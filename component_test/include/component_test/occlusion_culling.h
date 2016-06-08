@@ -53,7 +53,7 @@ public:
     OcclusionCulling(std::string modelName);
     OcclusionCulling();
     ~OcclusionCulling();
-    pcl::PointCloud<pcl::PointXYZ> extractVisibleSurface(geometry_msgs::Pose location);
+    pcl::PointCloud<pcl::PointXYZ> extractVisibleSurface(geometry_msgs::Pose location, float vRes = 0.5);
     //    float calcCoveragePercent(geometry_msgs::Pose location);
     float calcCoveragePercent(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
     double calcAvgAccuracy(pcl::PointCloud<pcl::PointXYZ> pointCloud);
