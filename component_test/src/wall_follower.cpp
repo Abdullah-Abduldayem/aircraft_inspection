@@ -1,3 +1,7 @@
+/* Author: Abdullah Abduldayem
+ * Derived from coverage_quantification.cpp
+ */
+
 #include <iostream>
 #include <math.h>
 #include <cmath>
@@ -69,6 +73,12 @@ int main(int argc, char **argv)
     //    return 0;
 
 	// >>>>>>>>>>>>>>>>>
+    // Initialize ROS
+    // >>>>>>>>>>>>>>>>>
+    ros::init(argc, argv, "wall_follower");
+    ros::NodeHandle ros_node;
+
+	// >>>>>>>>>>>>>>>>>
     // Get config parameters
     // >>>>>>>>>>>>>>>>>
     ros::NodeHandle nodeHandle = ros::NodeHandle("~");
@@ -104,12 +114,7 @@ int main(int argc, char **argv)
     cloud6.header.frame_id = "base_point_cloud";
     viewpoints.header.frame_id= "base_point_cloud";
 
-    // >>>>>>>>>>>>>>>>>
-    // Initialize ROS
-    // >>>>>>>>>>>>>>>>>
-    ros::init(argc, argv, "wall_follower");
-    ros::NodeHandle ros_node;
-
+	
     // >>>>>>>>>>>>>>>>>
     // Create publishers
     // >>>>>>>>>>>>>>>>>
@@ -131,6 +136,8 @@ int main(int argc, char **argv)
     std::cout<<"[] Loaded Model file\n";
 
     OcclusionCulling occlusionCulling(ros_node, modelPath);
+
+	// Display model
 
     // >>>>>>>>>>>>>>>>>
     // Iteratively perform exploration
