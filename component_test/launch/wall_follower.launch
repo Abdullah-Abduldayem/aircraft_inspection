@@ -2,15 +2,20 @@
 <launch>
 	<node pkg="component_test" type="wall_follower" name="wall_follower" clear_params="true" output="screen">
     
-		<!-- Occlusion culling -->
-		<param name="voxelRes" value="3" />
-		<param name="sensor_vert_fov" value="45" />
-		<param name="sensor_hor_fov" value="58" />
-		<param name="sensor_near_plane_distance" value="0.7" />
-		<param name="sensor_far_plane_distance" value="6.0" />
-
-		<param name="maxIterations" value="5" />
+		<param name="maxIterations" value="1" />
 		<param name="modelFilename" value="etihad_nowheels_densed.pcd" />
+		
+		<param name="initial_x" value="5" />
+		<param name="initial_y" value="16" />
+		<param name="initial_z" value="5" />
+		<param name="initial_yaw" value="2.8" />
+    
+		<!-- Occlusion culling -->
+		<param name="voxelRes" value="0.3" />
+		<param name="sensor_vert_fov" value="45" />
+		<param name="sensor_hor_fov" value="60" />
+		<param name="sensor_near_plane_distance" value="0.7" />
+		<param name="sensor_far_plane_distance" value="8.0" />
 
 	</node>
 </launch>

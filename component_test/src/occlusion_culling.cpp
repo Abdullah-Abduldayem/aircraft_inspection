@@ -6,8 +6,8 @@ float hor_fov;
 float near_dist;
 float far_dist;
 
-void OcclusionCulling::initConfig(ros::NodeHandle nodeHandle = ros::NodeHandle("~")){
-	// Get config parameters
+void OcclusionCulling::initConfig(ros::NodeHandle nodeHandle = ros::NodeHandle("~")) {
+    // Get config parameters
     nodeHandle.param<float>("voxelRes", voxelRes, 1.5f );
     nodeHandle.param<float>("sensor_vert_fov", vert_fov, 45);
     nodeHandle.param<float>("sensor_hor_fov", hor_fov, 58);
@@ -20,8 +20,8 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     model(modelName),
     fc(true)
 {
-	initConfig();
-    
+    initConfig();
+
     fov_pub = n.advertise<visualization_msgs::MarkerArray>("fov", 10);
     cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     filtered_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
@@ -38,7 +38,7 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     voxelFilterOriginal.initializeVoxelGrid();
     min_b1 = voxelFilterOriginal.getMinBoxCoordinates ();
     max_b1 = voxelFilterOriginal.getMaxBoxCoordinates ();
-    
+
     for (int kk = min_b1.z (); kk <= max_b1.z (); ++kk)
     {
         for (int jj = min_b1.y (); jj <= max_b1.y (); ++jj)
@@ -56,11 +56,11 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
         }
     }
 
-	pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
+    pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
     voxelgrid.setInputCloud (cloud);
     voxelgrid.setLeafSize (voxelRes, voxelRes, voxelRes);
     voxelgrid.filter (*filtered_cloud);
-    
+
     fc.setInputCloud (cloud);
     fc.setVerticalFOV (vert_fov);
     fc.setHorizontalFOV (hor_fov);
@@ -85,8 +85,8 @@ OcclusionCulling::OcclusionCulling(std::string modelName):
     model(modelName),
     fc(true)
 {
-	initConfig();
-	
+    initConfig();
+
     cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     filtered_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     FrustumCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
@@ -146,8 +146,8 @@ OcclusionCulling::OcclusionCulling():
     model(NULL),
     fc(true)
 {
-	initConfig();
-	
+    initConfig();
+
     cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     filtered_cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     FrustumCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
@@ -155,7 +155,7 @@ OcclusionCulling::OcclusionCulling():
     //    occlusionFreeCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     std::string path = ros::package::getPath("component_test");
     pcl::io::loadPCDFile<pcl::PointXYZ> (path+"/src/pcd/scaled_desktop.pcd", *cloud);
-    
+
     OriginalVoxelsSize=0.0;
     id=0.0;
     voxelFilterOriginal.setInputCloud (cloud);
@@ -179,8 +179,8 @@ OcclusionCulling::OcclusionCulling():
             }
         }
     }
-    
-	pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
+
+    pcl::VoxelGrid<pcl::PointXYZ> voxelgrid;
     voxelgrid.setInputCloud (cloud);
     voxelgrid.setLeafSize (voxelRes, voxelRes, voxelRes);
     voxelgrid.filter (*filtered_cloud);
@@ -210,25 +210,37 @@ OcclusionCulling::~OcclusionCulling()
 
 pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_msgs::Pose location)
 {
+    bool isModified = true;
     // >>>>>>>>>>>>>>>>>>>>
-    // 1. Frustum Culling
+    // 1. Frustum Culling (slightly larger than desired viewport for proper voxel occlusion)
     // >>>>>>>>>>>>>>>>>>>>
     pcl::PointCloud <pcl::PointXYZ>::Ptr output (new pcl::PointCloud <pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr occlusionFreeCloud_local(new pcl::PointCloud<pcl::PointXYZ>);
-
-    //    pcl::FrustumCullingTT fc (true);
-    //    fc.setInputCloud (cloud);
-    //    fc.setVerticalFOV (45);
-    //    fc.setHorizontalFOV (58);
-    //    fc.setNearPlaneDistance (0.7);
-    //    fc.setFarPlaneDistance (6.0);
-
 
     Eigen::Matrix4f camera_pose;
     Eigen::Matrix3d Rd;
     Eigen::Matrix3f Rf;
 
     camera_pose.setZero ();
+
+	
+	// Expand view (using 1.01*voxelRes to err on the side of safety for rounding errors)
+	if (isModified){
+		float deg2rad = M_PI/180;
+		
+		float new_vert_fov = atan(tan(vert_fov*deg2rad) + (1.01*voxelRes/2)/near_dist);
+		float new_hor_fov = atan(tan(hor_fov*deg2rad) + (1.01*voxelRes/2)/near_dist);
+		
+		new_vert_fov /= deg2rad;
+		new_hor_fov /= deg2rad;
+		
+		printf("V1: %f\nV2: %f\n", hor_fov, new_hor_fov);
+		
+		fc.setInputCloud (cloud);
+		fc.setVerticalFOV (new_vert_fov);
+		fc.setHorizontalFOV (new_hor_fov);
+	}
+    
 
     // Convert quaterion orientation to XYZ angles (?)
     tf::Quaternion qt;
@@ -259,7 +271,6 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
     ros::Time toc = ros::Time::now();
 
     //std::cout<<"\nFrustum Filter took:"<< toc.toSec() - tic.toSec();
-
     FrustumCloud->points= output->points;
 
 
@@ -272,7 +283,6 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
     output->sensor_orientation_= quat;
     pcl::VoxelGridOcclusionEstimationT voxelFilter;
     voxelFilter.setInputCloud (output);
-    //voxelFilter.setLeafSize (0.03279f, 0.03279f, 0.03279f);
     voxelFilter.setLeafSize (voxelRes, voxelRes, voxelRes);
     voxelFilter.initializeVoxelGrid();
 
@@ -348,8 +358,27 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
 
     }
     FreeCloud.points = occlusionFreeCloud_local->points;
+    
+    
+    
+    // >>>>>>>>>>>>>>>>>>>>
+    // 3. Frustum Culling (proper size as desired by sensor)
+    // >>>>>>>>>>>>>>>>>>>>
+    
+    if (isModified){
+		fc.setInputCloud (occlusionFreeCloud_local);
+		fc.setVerticalFOV (vert_fov);
+		fc.setHorizontalFOV (hor_fov);
+		
+		fc.filter (*output);
+		FreeCloud.points = output->points;
+	}
+    
     return FreeCloud;
 }
+
+
+
 float OcclusionCulling::calcCoveragePercent(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered)
 {
 

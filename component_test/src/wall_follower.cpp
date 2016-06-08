@@ -61,6 +61,10 @@ double rad2deg (double rad);
 
 std::string modelPath;
 int maxIterations;
+float initial_x;
+float initial_y;
+float initial_z;
+float initial_yaw;
 
 double randomDouble(double min, double max) {
     return ((double) random()/RAND_MAX)*(max-min) + min;
@@ -84,6 +88,10 @@ int main(int argc, char **argv)
     ros::NodeHandle nodeHandle = ros::NodeHandle("~");
     nodeHandle.param<int>("maxIterations", maxIterations, 20 );
     nodeHandle.param<std::string>("modelFilename", modelPath, "etihad_nowheels_densed.pcd");
+    nodeHandle.param<float>("initial_x", initial_x, 5);
+    nodeHandle.param<float>("initial_y", initial_y, 16);
+    nodeHandle.param<float>("initial_z", initial_z, 4);
+    nodeHandle.param<float>("initial_yaw", initial_yaw, 0);
 
     // >>>>>>>>>>>>>>>>>
     // Variable declaration
@@ -153,10 +161,10 @@ int main(int argc, char **argv)
 
     Vec3f pos_inc(0,0,0); // Increment to add to position
 
-    pt.position.x = 5;
-    pt.position.y = 16;
-    pt.position.z = 4;
-    yaw = 0;
+    pt.position.x = initial_x;
+    pt.position.y = initial_y;
+    pt.position.z = initial_z;
+    yaw = initial_yaw;
 
 
     /*
