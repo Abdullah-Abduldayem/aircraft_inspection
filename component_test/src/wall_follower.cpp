@@ -55,8 +55,8 @@ geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, V
 bool parseInputs(int argc, char **argv);
 double rad2deg (double rad);
 
-std::string modelPath = "etihad_nowheels_densed.pcd";
-int maxIterations = 20;
+std::string modelPath;
+int maxIterations;
 
 double randomDouble(double min, double max) {
     return ((double) random()/RAND_MAX)*(max-min) + min;
@@ -65,8 +65,15 @@ double randomDouble(double min, double max) {
 int main(int argc, char **argv)
 {
     // Parse inputs. Exit if help is used
-    if (parseInputs(argc, argv))
-        return 0;
+    //if (parseInputs(argc, argv))
+    //    return 0;
+
+	// >>>>>>>>>>>>>>>>>
+    // Get config parameters
+    // >>>>>>>>>>>>>>>>>
+    ros::NodeHandle nodeHandle = ros::NodeHandle("~");
+    nodeHandle.param<int>("maxIterations", maxIterations, 20 );
+    nodeHandle.param<std::string>("modelFilename", modelPath, "etihad_nowheels_densed.pcd");
 
     // >>>>>>>>>>>>>>>>>
     // Variable declaration
@@ -124,7 +131,6 @@ int main(int argc, char **argv)
     std::cout<<"[] Loaded Model file\n";
 
     OcclusionCulling occlusionCulling(ros_node, modelPath);
-
 
     // >>>>>>>>>>>>>>>>>
     // Iteratively perform exploration
@@ -203,7 +209,7 @@ int main(int argc, char **argv)
 
         // Perform occlusion culling
         pcl::PointCloud<pcl::PointXYZ> tempCloud;
-        tempCloud = occlusionCulling.extractVisibleSurface(loc, 0.5f); // perform culling
+        tempCloud = occlusionCulling.extractVisibleSurface(loc); // perform culling
         occlusionCulling.visualizeFOV(loc); // visualize FOV
 
 

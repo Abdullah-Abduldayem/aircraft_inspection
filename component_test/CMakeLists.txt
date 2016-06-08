@@ -70,8 +70,8 @@ add_library(fcl_test src/fcl_utility.cpp )
 add_library(frustum_culling src/frustum_culling.cpp )
 target_link_libraries(frustum_culling voxel_grid ${catkin_LIBRARIES} -lgmp -lmpfr ${CGAL_LIBRARY} ${CGAL_Core_LIBRARY} ${PCL_LIBRARIES})
 
-add_library(mesh_surface src/mesh_surface.cpp )
-target_link_libraries(mesh_surface ${catkin_LIBRARIES} -lgmp -lmpfr ${CGAL_LIBRARY} ${CGAL_Core_LIBRARY} ${PCL_LIBRARIES})
+#add_library(mesh_surface src/mesh_surface.cpp )
+#target_link_libraries(mesh_surface ${catkin_LIBRARIES} -lgmp -lmpfr ${CGAL_LIBRARY} ${CGAL_Core_LIBRARY} ${PCL_LIBRARIES})
 
 add_library(occlusion_culling src/occlusion_culling.cpp)
 target_link_libraries(occlusion_culling frustum_culling voxel_grid_occlusion_estimation ${catkin_LIBRARIES} ${PCL_LIBRARIES})

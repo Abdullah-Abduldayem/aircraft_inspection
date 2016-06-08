@@ -1,9 +1,19 @@
 #include "component_test/occlusion_culling.h"
+#include <ros/ros.h>
 
 float vert_fov;
 float hor_fov;
 float near_dist;
 float far_dist;
+
+void OcclusionCulling::initConfig(ros::NodeHandle nodeHandle = ros::NodeHandle("~")){
+	// Get config parameters
+    nodeHandle.param<float>("voxelRes", voxelRes, 1.5f );
+    nodeHandle.param<float>("sensor_vert_fov", vert_fov, 45);
+    nodeHandle.param<float>("sensor_hor_fov", hor_fov, 58);
+    nodeHandle.param<float>("sensor_near_plane_distance", near_dist, 0.7);
+    nodeHandle.param<float>("sensor_far_plane_distance", far_dist, 6.0);
+}
 
 OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     nh(n),
@@ -11,9 +21,6 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     fc(true)
 {
 	initConfig();
-	
-    //   original_pub = nh.advertise<sensor_msgs::PointCloud2>("original_point_cloud", 10);
-    //   visible_pub = nh.advertise<sensor_msgs::PointCloud2>("occlusion_free_cloud", 100);
     
     fov_pub = n.advertise<visualization_msgs::MarkerArray>("fov", 10);
     cloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
@@ -31,6 +38,7 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     voxelFilterOriginal.initializeVoxelGrid();
     min_b1 = voxelFilterOriginal.getMinBoxCoordinates ();
     max_b1 = voxelFilterOriginal.getMaxBoxCoordinates ();
+    
     for (int kk = min_b1.z (); kk <= max_b1.z (); ++kk)
     {
         for (int jj = min_b1.y (); jj <= max_b1.y (); ++jj)
@@ -52,7 +60,7 @@ OcclusionCulling::OcclusionCulling(ros::NodeHandle &n, std::string modelName):
     voxelgrid.setInputCloud (cloud);
     voxelgrid.setLeafSize (voxelRes, voxelRes, voxelRes);
     voxelgrid.filter (*filtered_cloud);
-
+    
     fc.setInputCloud (cloud);
     fc.setVerticalFOV (vert_fov);
     fc.setHorizontalFOV (hor_fov);
@@ -147,7 +155,7 @@ OcclusionCulling::OcclusionCulling():
     //    occlusionFreeCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud <pcl::PointXYZ>);
     std::string path = ros::package::getPath("component_test");
     pcl::io::loadPCDFile<pcl::PointXYZ> (path+"/src/pcd/scaled_desktop.pcd", *cloud);
-    voxelRes = 0.5;
+    
     OriginalVoxelsSize=0.0;
     id=0.0;
     voxelFilterOriginal.setInputCloud (cloud);
@@ -200,18 +208,7 @@ OcclusionCulling::~OcclusionCulling()
 }
 
 
-
-void initConfig(){
-	// Get config parameters
-    ros_tools::getParam( voxelRes, "voxelRes", 0.5 );
-    ros_tools::getParam( vert_fov, "sensor_vert_fov", 45 );
-    ros_tools::getParam( hor_fov,  "sensor_hor_fov", 58 );
-    ros_tools::getParam( near_dist,"sensor_near_plane_distance", 0.7 );
-    ros_tools::getParam( far_dist, "sensor_far_plane_distance", 6.0 );
-}
-
-
-pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_msgs::Pose location, float vRes)
+pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_msgs::Pose location)
 {
     // >>>>>>>>>>>>>>>>>>>>
     // 1. Frustum Culling
@@ -270,8 +267,6 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
     // >>>>>>>>>>>>>>>>>>>>
     // 2. Voxel grid occlusion estimation
     // >>>>>>>>>>>>>>>>>>>>
-    voxelRes = vRes;
-
     Eigen::Quaternionf quat(qt.w(),qt.x(),qt.y(),qt.z());
     output->sensor_origin_  = Eigen::Vector4f(T[0],T[1],T[2],0);
     output->sensor_orientation_= quat;
@@ -457,102 +452,7 @@ double OcclusionCulling::calcAvgAccuracy(pcl::PointCloud<pcl::PointXYZ> pointClo
     avgAccuracy=errorSum/pointCloud.size();
     return avgAccuracy;
 }
-//float OcclusionCulling::calcCoveragePercent(geometry_msgs::Pose location)
-//{
 
-//    pcl::PointCloud<pcl::PointXYZ>::Ptr tempCloud(new pcl::PointCloud<pcl::PointXYZ>);
-//    pcl::PointCloud<pcl::PointXYZ> temp;
-//    ros::Time occlusion_begin = ros::Time::now();
-//    temp= extractVisibleSurface(location);
-//    tempCloud->points = temp.points;
-//    ros::Time occlusion_end = ros::Time::now();
-//    double elapsed =  occlusion_end.toSec() - occlusion_begin.toSec();
-//    std::cout<<"Extract visible surface duration (s) = "<<elapsed<<"\n";
-//    // *******************original cloud Grid***************************
-//    //used VoxelGridOcclusionEstimationT since the voxelGrid does not include getcentroid function
-////        pcl::VoxelGridOcclusionEstimationT voxelFilterOriginal;
-////        voxelFilterOriginal.setInputCloud (cloud);
-////        voxelFilterOriginal.setLeafSize (voxelRes, voxelRes, voxelRes);
-////        voxelFilterOriginal.initializeVoxelGrid();
-
-//     //*******************Occupied Cloud Grid***************************
-//    ros::Time covpercent_begin = ros::Time::now();
-//    pcl::VoxelGridOcclusionEstimationT voxelFilterOccupied;
-////        voxelFilterOccupied.setInputCloud (occlusionFreeCloud);
-//    voxelFilterOccupied.setInputCloud (tempCloud);
-//    voxelFilterOccupied.setLeafSize (voxelRes, voxelRes, voxelRes);
-//    voxelFilterOccupied.initializeVoxelGrid();
-
-
-
-//     //*****************************************************************
-//    Eigen::Vector3i  min_b = voxelFilterOccupied.getMinBoxCoordinates ();
-//    Eigen::Vector3i  max_b = voxelFilterOccupied.getMaxBoxCoordinates ();
-////        Eigen::Vector3i  min_b1 = voxelFilterOriginal.getMinBoxCoordinates ();
-////        Eigen::Vector3i  max_b1 = voxelFilterOriginal.getMaxBoxCoordinates ();
-
-//    float MatchedVoxels=0 ;//OriginalVoxelsSize=0, ;
-
-//        // iterate over the entire original voxel grid to get the size of the grid
-////        for (int kk = min_b1.z (); kk <= max_b1.z (); ++kk)
-////        {
-////            for (int jj = min_b1.y (); jj <= max_b1.y (); ++jj)
-////            {
-////                for (int ii = min_b1.x (); ii <= max_b1.x (); ++ii)
-////                {
-////                    Eigen::Vector3i ijk1 (ii, jj, kk);
-////                    int index1 = voxelFilterOriginal.getCentroidIndexAt (ijk1);
-////                    if(index1!=-1)
-////                    {
-////                        OriginalVoxelsSize++;
-////                    }
-
-////                }
-////            }
-////        }
-
-//        //iterate through the entire coverage grid to check the number of matched voxel between the original and the covered ones
-//    for (int kk = min_b.z (); kk <= max_b.z (); ++kk)
-//    {
-//        for (int jj = min_b.y (); jj <= max_b.y (); ++jj)
-//        {
-//            for (int ii = min_b.x (); ii <= max_b.x (); ++ii)
-//            {
-
-//                Eigen::Vector3i ijk (ii, jj, kk);
-//                int index1 = voxelFilterOccupied.getCentroidIndexAt (ijk);
-//                if(index1!=-1)
-//                {
-//                    Eigen::Vector4f centroid = voxelFilterOccupied.getCentroidCoordinate (ijk);
-//                    Eigen::Vector3i ijk_in_Original= voxelFilterOriginal.getGridCoordinates(centroid[0],centroid[1],centroid[2]) ;
-
-//                    int index = voxelFilterOriginal.getCentroidIndexAt (ijk_in_Original);
-
-//                    if(index!=-1)
-//                    {
-//                        MatchedVoxels++;
-//                    }
-//                }
-
-//            }
-//        }
-//    }
-
-//    //calculating the coverage percentage
-//    float coverage_ratio= MatchedVoxels/OriginalVoxelsSize;
-//    float coverage_percentage= coverage_ratio*100;
-
-//    std::cout<<" the coverage ratio is = "<<coverage_ratio<<"\n";
-//    std::cout<<" the number of covered voxels = "<<MatchedVoxels<<" voxel is covered"<<"\n";
-//    std::cout<<" the number of original voxels = "<<OriginalVoxelsSize<<" voxel"<<"\n\n\n";
-//    std::cout<<" the coverage percentage is = "<<coverage_percentage<<" %"<<"\n";
-
-//    ros::Time covpercent_end = ros::Time::now();
-//    elapsed =  covpercent_end.toSec() - covpercent_begin.toSec();
-//    std::cout<<"Coverage Percentage Calculation duration (s) = "<<elapsed<<"\n";
-
-//    return coverage_percentage;
-//}
 
 void OcclusionCulling::visualizeFOV(geometry_msgs::Pose location)
 {

@@ -49,11 +49,12 @@ public:
     double maxAccuracyError, minAccuracyError;
 
     //methods
-    OcclusionCulling(ros::NodeHandle & n, std::string modelName);
-    OcclusionCulling(std::string modelName);
     OcclusionCulling();
+    OcclusionCulling(std::string modelName);
+    OcclusionCulling(ros::NodeHandle & n, std::string modelName);
     ~OcclusionCulling();
-    pcl::PointCloud<pcl::PointXYZ> extractVisibleSurface(geometry_msgs::Pose location, float vRes = 0.5);
+    void initConfig(ros::NodeHandle nodeHandle);
+    pcl::PointCloud<pcl::PointXYZ> extractVisibleSurface(geometry_msgs::Pose location);
     //    float calcCoveragePercent(geometry_msgs::Pose location);
     float calcCoveragePercent(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
     double calcAvgAccuracy(pcl::PointCloud<pcl::PointXYZ> pointCloud);
