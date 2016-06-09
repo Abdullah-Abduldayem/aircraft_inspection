@@ -27,7 +27,9 @@
 class OcclusionCulling
 {
 public:
-    //attributes
+	// >>>>>>>>
+    // Attributes
+    // >>>>>>>>
     ros::NodeHandle  nh;
     std::string model;
     //     ros::Publisher original_pub;
@@ -48,18 +50,24 @@ public:
     pcl::FrustumCullingTT fc;
     double maxAccuracyError, minAccuracyError;
 
-    //methods
+	// >>>>>>>>
+    // Methods
+    // >>>>>>>>
     OcclusionCulling();
     OcclusionCulling(std::string modelName);
     OcclusionCulling(ros::NodeHandle & n, std::string modelName);
     ~OcclusionCulling();
     void initConfig(ros::NodeHandle nodeHandle);
+    void visualizeRaycast(geometry_msgs::Pose location);
+    
     pcl::PointCloud<pcl::PointXYZ> extractVisibleSurface(geometry_msgs::Pose location);
     //    float calcCoveragePercent(geometry_msgs::Pose location);
     float calcCoveragePercent(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered);
     double calcAvgAccuracy(pcl::PointCloud<pcl::PointXYZ> pointCloud);
     void visualizeFOV(geometry_msgs::Pose location);
+    
     visualization_msgs::Marker drawLines(std::vector<geometry_msgs::Point> links, int id, int c_color[]);
+    visualization_msgs::Marker drawLines(std::vector<geometry_msgs::Point> links, int id, int c_color[], float scale);
 
 
 };

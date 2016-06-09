@@ -11,11 +11,12 @@
 		<param name="initial_yaw" value="2.8" />
     
 		<!-- Occlusion culling -->
+		<param name="frame_id" value="base_point_cloud" />
+		
 		<param name="voxelRes" value="0.3" />
 		<param name="sensor_vert_fov" value="45" />
 		<param name="sensor_hor_fov" value="60" />
 		<param name="sensor_near_plane_distance" value="0.7" />
 		<param name="sensor_far_plane_distance" value="8.0" />
-
 	</node>
 </launch>
