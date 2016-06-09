@@ -144,6 +144,7 @@ int main(int argc, char **argv)
     std::cout<<"[] Loaded Model file\n";
 
     OcclusionCulling occlusionCulling(ros_node, modelPath);
+    std::cout<<"[] Initialized occlusion culler\n";
 
 	// Display model
 
@@ -224,7 +225,13 @@ int main(int argc, char **argv)
 
         // Perform occlusion culling
         pcl::PointCloud<pcl::PointXYZ> tempCloud;
+        
+        ros::Time tic = ros::Time::now();
         tempCloud = occlusionCulling.extractVisibleSurface(loc); // perform culling
+        ros::Time toc = ros::Time::now();
+        
+        printf("\nOcclusion culling took: %f seconds\n", toc.toSec() - tic.toSec() );
+        
         occlusionCulling.visualizeFOV(loc); // visualize FOV
 
 
@@ -286,7 +293,7 @@ int main(int argc, char **argv)
             }
 
             // Move vertically opposite of norm (objective is to look directly at flat part of object, not above or below)
-            pos_inc[2] = -plane_parameters[2];
+            //pos_inc[2] = -plane_parameters[2];
             
             std::cout << "\n";
         }

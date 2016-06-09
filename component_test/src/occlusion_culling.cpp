@@ -239,9 +239,8 @@ OcclusionCulling::~OcclusionCulling()
 
 pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_msgs::Pose location)
 {
-    bool isModified = true;
     // >>>>>>>>>>>>>>>>>>>>
-    // 1. Frustum Culling (slightly larger than desired viewport for proper voxel occlusion)
+    // 1. Frustum Culling
     // >>>>>>>>>>>>>>>>>>>>
     pcl::PointCloud <pcl::PointXYZ>::Ptr output (new pcl::PointCloud <pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr occlusionFreeCloud_local(new pcl::PointCloud<pcl::PointXYZ>);
@@ -251,22 +250,6 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
     Eigen::Matrix3f Rf;
 
     camera_pose.setZero ();
-
-
-    // Expand view (using 1.01*voxelRes to err on the side of safety for rounding errors)
-    if (isModified) {
-        float deg2rad = M_PI/180;
-
-        float new_vert_fov = atan(tan(vert_fov*deg2rad) + (1.01*voxelRes/2)/near_dist);
-        float new_hor_fov = atan(tan(hor_fov*deg2rad) + (1.01*voxelRes/2)/near_dist);
-
-        new_vert_fov /= deg2rad;
-        new_hor_fov /= deg2rad;
-
-        fc.setInputCloud (cloud);
-        fc.setVerticalFOV (new_vert_fov);
-        fc.setHorizontalFOV (new_hor_fov);
-    }
 
 
     // Convert quaterion orientation to XYZ angles (?)
@@ -324,90 +307,87 @@ pcl::PointCloud<pcl::PointXYZ> OcclusionCulling::extractVisibleSurface(geometry_
     // iterate over the entire frustum points
     for ( int i = 0; i < (int)output->points.size(); i ++ )
     {
+        // Get voxel centroid corresponding to selected point
         pcl::PointXYZ ptest = output->points[i];
         Eigen::Vector3i ijk = voxelFilter.getGridCoordinates( ptest.x, ptest.y, ptest.z);
-        // process all free voxels
-        int index = voxelFilter.getCentroidIndexAt (ijk);
+        
+        if(voxelFilter.getCentroidIndexAt(ijk) == -1 ) {
+			// Voxel is out of bounds
+            continue;
+        }
+
         Eigen::Vector4f centroid = voxelFilter.getCentroidCoordinate (ijk);
         point = pcl::PointXYZRGB(0,244,0);
         point.x = centroid[0];
         point.y = centroid[1];
         point.z = centroid[2];
 
-        if(index!=-1 )
-        {
-            out_ray.clear();
-            ret = voxelFilter.occlusionEstimation( state,out_ray, ijk);
-            //                        std::cout<<"State is:"<<state<<"\n";
+		// >>>>>>>>>>>>>>>>>>>>
+		// 2.1 Perform occlusion estimation
+		// >>>>>>>>>>>>>>>>>>>>
+		
+		/*
+		 * The way this works is it traces a line to the point and finds
+		 * the distance to the first occupied voxel in its path (t_min).
+		 * It then determines if the distance between the target point and
+		 * the collided voxel are close (within voxelRes).
+		 * 
+		 * If they are, the point is visible. Otherwise, the point is behind
+		 * an occluding point
+		 * 
+		 * 
+		 * This is the expected function of the following command:
+		 *   ret = voxelFilter.occlusionEstimation( state,out_ray, ijk);
+		 * 
+		 * However, it sometimes shows occluded points on the edge of the cloud
+		 */
+		
+		// Direction to target voxel
+		Eigen::Vector4f direction = centroid - output->sensor_origin_;
+		direction.normalize ();
+		
+		// Estimate entry point into the voxel grid
+		float tmin = voxelFilter.rayBoxIntersection (output->sensor_origin_, direction,p1,p2); //where did this 4-input syntax come from?
+		
+		if(tmin == -1){
+			// ray does not intersect with the bounding box
+			continue;
+		}
+		
+		// Calculate coordinate of the boundary of the voxel grid
+		Eigen::Vector4f start = output->sensor_origin_ + tmin * direction;
+		
+		// Determine distance between boundary and target voxel centroid
+		Eigen::Vector4f dist_vector = centroid-start;
+		float distance = (dist_vector).dot(dist_vector);
 
-            if(state != 1)
-            {
-                // estimate direction to target voxel
-                Eigen::Vector4f direction = centroid - cloud->sensor_origin_;
-                direction.normalize ();
-                // estimate entry point into the voxel grid
-                float tmin = voxelFilter.rayBoxIntersection (cloud->sensor_origin_, direction,p1,p2);
-                if(tmin!=-1)
-                {
-                    // coordinate of the boundary of the voxel grid
-                    Eigen::Vector4f start = cloud->sensor_origin_ + tmin * direction;
-                    linePoint.x = cloud->sensor_origin_[0];
-                    linePoint.y = cloud->sensor_origin_[1];
-                    linePoint.z = cloud->sensor_origin_[2];
-                    //std::cout<<"Box Min X:"<<linePoint.x<<" y:"<< linePoint.y<<" z:"<< linePoint.z<<"\n";
-                    lineSegments.push_back(linePoint);
+		if (distance > voxelRes*1.414){ // voxelRes/sqrt(2)
+			// ray does not correspond to this point
+			continue;
+		}
+		
+		// Save point
+		occlusionFreeCloud_local->points.push_back(ptest);
+		occlusionFreeCloud->points.push_back(ptest);
+		
 
-					linePoint.x = cloud->sensor_origin_[0]+0.1;
-                    linePoint.y = cloud->sensor_origin_[1]+0.1;
-                    linePoint.z = cloud->sensor_origin_[2]+0.1;
-                    //std::cout<<"Box Min X:"<<linePoint.x<<" y:"<< linePoint.y<<" z:"<< linePoint.z<<"\n";
-                    lineSegments.push_back(linePoint);
+		// >>>>>>>>>>>>>>>>>>>>
+		// 2.2 Save line segment for visualization
+		// >>>>>>>>>>>>>>>>>>>>
 
-                    //linePoint.x = start[0];
-                    //linePoint.y = start[1];
-                    //linePoint.z = start[2];
-                    //std::cout<<"Box Max X:"<<linePoint.x<<" y:"<< linePoint.y<<" z:"<< linePoint.z<<"\n";
-                    //lineSegments.push_back(linePoint);
+		linePoint.x = output->sensor_origin_[0];
+		linePoint.y = output->sensor_origin_[1];
+		linePoint.z = output->sensor_origin_[2];
+		lineSegments.push_back(linePoint);
 
-                    //linePoint.x = start[0];
-                    //linePoint.y = start[1];
-                    //linePoint.z = start[2];
-                    //std::cout<<"Box Max X:"<<linePoint.x<<" y:"<< linePoint.y<<" z:"<< linePoint.z<<"\n";
-                    //lineSegments.push_back(linePoint);
+		linePoint.x = start[0];
+		linePoint.y = start[1];
+		linePoint.z = start[2];
+		lineSegments.push_back(linePoint);
 
-                    //linePoint.x = centroid[0];
-                    //linePoint.y = centroid[1];
-                    //linePoint.z = centroid[2];
-                    //std::cout<<"Box Max X:"<<linePoint.x<<" y:"<< linePoint.y<<" z:"<< linePoint.z<<"\n";
-                    //lineSegments.push_back(linePoint);
-
-					occupancyGrid->points.push_back(point);
-
-                    occlusionFreeCloud_local->points.push_back(ptest);
-                    occlusionFreeCloud->points.push_back(ptest);
-
-                }
-            }
-        }
-
-
+		occupancyGrid->points.push_back(point);
     }
     FreeCloud.points = occlusionFreeCloud_local->points;
-
-
-
-    // >>>>>>>>>>>>>>>>>>>>
-    // 3. Frustum Culling (proper size as desired by sensor)
-    // >>>>>>>>>>>>>>>>>>>>
-
-    if (isModified) {
-        fc.setInputCloud (occlusionFreeCloud_local);
-        fc.setVerticalFOV (vert_fov);
-        fc.setHorizontalFOV (hor_fov);
-
-        fc.filter (*output);
-        FreeCloud.points = output->points;
-    }
 
     return FreeCloud;
 }
@@ -613,17 +593,17 @@ void OcclusionCulling::visualizeFOV(geometry_msgs::Pose location)
     marker_array.markers.push_back(linesList3);
     marker_array.markers.push_back(linesList4);
     fov_pub.publish(marker_array);
-    
+
     visualizeRaycast(location); // For debugging
 }
 
 void OcclusionCulling::visualizeRaycast(geometry_msgs::Pose location) {
-	int c_color[3];
-	c_color[0]=0;
+    int c_color[3];
+    c_color[0]=0;
     c_color[1]=1;
-    c_color[2]=0;
+    c_color[2]=1;
     visualization_msgs::Marker linesList = drawLines(lineSegments, 0, c_color, 0.02);
-    
+
     sensor_msgs::PointCloud2 cloud3;
     pcl::toROSMsg(*occupancyGrid, cloud3);
 

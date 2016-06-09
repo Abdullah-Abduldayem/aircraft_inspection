@@ -2,13 +2,13 @@
 <launch>
 	<node pkg="component_test" type="wall_follower" name="wall_follower" clear_params="true" output="screen">
     
-		<param name="maxIterations" value="1" />
+		<param name="maxIterations" value="30" />
 		<param name="modelFilename" value="etihad_nowheels_densed.pcd" />
 		
 		<param name="initial_x" value="5" />
 		<param name="initial_y" value="16" />
-		<param name="initial_z" value="5" />
-		<param name="initial_yaw" value="2.8" />
+		<param name="initial_z" value="4" />
+		<param name="initial_yaw" value="0" />
     
 		<!-- Occlusion culling -->
 		<param name="frame_id" value="base_point_cloud" />
