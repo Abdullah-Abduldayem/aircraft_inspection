@@ -56,7 +56,6 @@ using namespace fcl;
 
 
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz);
-bool parseInputs(int argc, char **argv);
 double rad2deg (double rad);
 
 std::string modelPath;
@@ -66,8 +65,31 @@ float initial_y;
 float initial_z;
 float initial_yaw;
 
+// Colors for console window
+const std::string cc_black("\033[0;30m");
+const std::string cc_red("\033[0;31m");
+const std::string cc_green("\033[1;32m");
+const std::string cc_yellow("\033[1;33m");
+const std::string cc_blue("\033[1;34m");
+const std::string cc_magenta("\033[0;35m");
+const std::string cc_cyan("\033[0;36m");
+const std::string cc_white("\033[0;37m");
+
+const std::string cc_bold("\033[1m");
+const std::string cc_darken("\033[2m");
+const std::string cc_underline("\033[4m");
+const std::string cc_background("\033[7m");
+const std::string cc_strike("\033[9m");
+
+const std::string cc_erase_line("\033[2K");
+const std::string cc_reset("\033[0m");
+
 double randomDouble(double min, double max) {
     return ((double) random()/RAND_MAX)*(max-min) + min;
+}
+
+double rad2deg (double rad) {
+    return rad*180/M_PI;
 }
 
 int main(int argc, char **argv)
@@ -76,13 +98,13 @@ int main(int argc, char **argv)
     //if (parseInputs(argc, argv))
     //    return 0;
 
-	// >>>>>>>>>>>>>>>>>
+    // >>>>>>>>>>>>>>>>>
     // Initialize ROS
     // >>>>>>>>>>>>>>>>>
     ros::init(argc, argv, "wall_follower");
     ros::NodeHandle ros_node;
 
-	// >>>>>>>>>>>>>>>>>
+    // >>>>>>>>>>>>>>>>>
     // Get config parameters
     // >>>>>>>>>>>>>>>>>
     ros::NodeHandle nodeHandle = ros::NodeHandle("~");
@@ -122,16 +144,12 @@ int main(int argc, char **argv)
     cloud6.header.frame_id = "base_point_cloud";
     viewpoints.header.frame_id= "base_point_cloud";
 
-	
+
     // >>>>>>>>>>>>>>>>>
     // Create publishers
     // >>>>>>>>>>>>>>>>>
     ros::Publisher originalCloudPub          = ros_node.advertise<sensor_msgs::PointCloud2>("original_cloud", 100);
-    //ros::Publisher originalFilteredCloudPub  = ros_node.advertise<sensor_msgs::PointCloud2>("original_cloud_filtered", 100);
     ros::Publisher predictedCloudPub         = ros_node.advertise<sensor_msgs::PointCloud2>("predicted_cloud", 100);
-    ros::Publisher predictedCloudFilteredPub = ros_node.advertise<sensor_msgs::PointCloud2>("predicted_cloud_filtered", 100);
-    //ros::Publisher coverdCloudPub            = ros_node.advertise<sensor_msgs::PointCloud2>("covered_cloud", 100);
-    //ros::Publisher matchedCloudPub           = ros_node.advertise<sensor_msgs::PointCloud2>("matched_cloud", 100);
     ros::Publisher sensorPosePub             = ros_node.advertise<geometry_msgs::PoseArray>("sensor_pose", 10);
 
     std::cout<<"[] Created publishers\n";
@@ -143,10 +161,9 @@ int main(int argc, char **argv)
     pcl::io::loadPCDFile<pcl::PointXYZ> (path+"/src/pcd/" + modelPath, *originalCloud);
     std::cout<<"[] Loaded Model file\n";
 
+	std::cout<<"Initializing occlusion culler...\n";
     OcclusionCulling occlusionCulling(ros_node, modelPath);
     std::cout<<"[] Initialized occlusion culler\n";
-
-	// Display model
 
     // >>>>>>>>>>>>>>>>>
     // Iteratively perform exploration
@@ -159,46 +176,34 @@ int main(int argc, char **argv)
     // Position Variables
     geometry_msgs::Pose pt,loc;
     double yaw;
+    double yaw_wallNormal = 0;
 
-    Vec3f pos_inc(0,0,0); // Increment to add to position
+    // Increment to add to position
+    Vec3f pos_inc(0,0,0);
+    double yaw_inc = 0;
 
     pt.position.x = initial_x;
     pt.position.y = initial_y;
     pt.position.z = initial_z;
     yaw = initial_yaw;
 
-
-    /*
-    pt.position.x = 4.27472;
-    pt.position.y = 18.9289;
-    pt.position.z = 5;
-    yaw = -2.96177;
-    */
-
-
     // Control variables
     bool isSpinning = true;
     bool isTerminating = false;
+    double viewingAngle = -M_PI_4/2; //Used to keep the camera looking ahead so it doesn't crash into a wall
 
     double maxRotationRate = M_PI_4;
 
-
     for (int viewPointCount=0; viewPointCount<maxIterations; viewPointCount++)
     {
-        std::cout << "Viewpoint " << viewPointCount << "\n";
-
-        // Create random pose
-        //pt.position.x = randomDouble(10, -10);
-        //pt.position.y = randomDouble(30, -30);
-        //pt.position.z = randomDouble(0, 10);
-        //yaw = randomDouble(-M_PI, M_PI);
+        std::cout << cc_magenta << cc_bold << "\nViewpoint " << viewPointCount << cc_reset << "\n";
 
         // Initially spin in place to scan the surrounding area
         if (isSpinning) {
+            yaw += M_PI_4;
+
             if (yaw >= 2*M_PI)
-                isSpinning = false;
-            else
-                yaw += M_PI_4;
+                yaw -= 2*M_PI;
         }
 
         // Otherwise explore
@@ -206,8 +211,11 @@ int main(int argc, char **argv)
             pt.position.x += pos_inc[0];
             pt.position.y += pos_inc[1];
             pt.position.z += pos_inc[2];
-            //yaw += randomDouble(-M_PI/8, M_PI/8);
+            yaw += yaw_inc;
         }
+
+        printf("[x, y, z, yaw] = [%f,\t%f,\t%f,\t%f] \n",
+               pt.position.x, pt.position.y, pt.position.z, rad2deg(yaw));
 
         // Generate quaterion
         tf::Quaternion tf_q ;
@@ -225,13 +233,7 @@ int main(int argc, char **argv)
 
         // Perform occlusion culling
         pcl::PointCloud<pcl::PointXYZ> tempCloud;
-        
-        ros::Time tic = ros::Time::now();
         tempCloud = occlusionCulling.extractVisibleSurface(loc); // perform culling
-        ros::Time toc = ros::Time::now();
-        
-        printf("\nOcclusion culling took: %f seconds\n", toc.toSec() - tic.toSec() );
-        
         occlusionCulling.visualizeFOV(loc); // visualize FOV
 
 
@@ -250,67 +252,50 @@ int main(int argc, char **argv)
                 indices[i] = i;
 
             computePointNormal (tempCloud, indices, plane_parameters, curvature);
+            printf("Normal = [%f, %f, %f, %f]\n", plane_parameters[0], plane_parameters[1], plane_parameters[2], curvature);
 
             // Calculate normal of surface
-            double yaw_new = atan2 (-plane_parameters[1], -plane_parameters[0]);
+            yaw_wallNormal = atan2 (-plane_parameters[1], -plane_parameters[0]);
+            yaw_wallNormal = fmod(yaw_wallNormal + 2*M_PI, 2*M_PI); // Make it between 0 to 360
 
+            // If the current yaw and desired yaw (wall normal) are far away, add a small increment to the yaw
+            double angle_difference = yaw_wallNormal - yaw;
 
+            printf("Desired Yaw = %f\n"
+                   "Angle Diff = %f \n", rad2deg(yaw_wallNormal), rad2deg(angle_difference) );
 
-
-            //std::cout << "Normal = [" << plane_parameters[0] << ", " << plane_parameters[1] << ", "<< plane_parameters[2] << "]\n";
-            printf("Current Position:\n"
-            "x = %f \n"
-            "y = %f \n"
-            "z = %f \n"
-            "yaw = %f \n"
-            "NewYaw = %f \n", pt.position.x, pt.position.y, pt.position.z, rad2deg(yaw), rad2deg(yaw_new));          
-
-
-
-			// If the current viewpoint and normal are far away and require very fast rotation, perform some action
-			double angle_difference = fmod(yaw - yaw_new, M_PI);
-			std::cout << "Angle difference: " << rad2deg(angle_difference) << "\n";
-			
             if (fabs(angle_difference) > maxRotationRate) {
-                yaw += copysign(maxRotationRate/2, angle_difference);
+                yaw_inc = copysign(maxRotationRate, angle_difference);
 
-                // Move perpendicular to x-y of norm
-                /*
-                pos_inc[0] = sin(yaw);
-                pos_inc[1] = -cos(yaw);
-                */
-
-                std::cout << "INFO: Max rotation rate triggered\n";
+                std::cout << cc_yellow << "INFO: Max rotation rate triggered\n" << cc_reset;
             }
-            
+
             // Otherwise use the normal as the new angle
             else {
-                yaw = yaw_new;
+                yaw = yaw_wallNormal + viewingAngle;
+                yaw_inc = 0;
 
                 // Move perpendicular to x-y of norm
-                pos_inc[0] = sin(yaw_new);
-                pos_inc[1] = -cos(yaw_new);
+                pos_inc[0] = sin(yaw_wallNormal);
+                pos_inc[1] = -cos(yaw_wallNormal);
             }
 
             // Move vertically opposite of norm (objective is to look directly at flat part of object, not above or below)
             //pos_inc[2] = -plane_parameters[2];
-            
-            std::cout << "\n";
         }
 
-
+		/*
         // Lost track, didn't see anything, start spinning
         else {
-            /*
             if (!isSpinning)
             	isTerminating = true;
-            */
             //isSpinning = true;
         }
+        */
 
 
 
-
+        std::cout << "\n";
 
         // Add points to cloud
         predictedCloud += tempCloud;
@@ -371,42 +356,6 @@ int main(int argc, char **argv)
 }
 
 
-
-
-bool parseInputs(int argc, char **argv) {
-	std::string arg;
-	
-    for (int i = 1; i<argc; i++) {
-		arg = std::string(argv[i]); //Cast to string
-		
-        if (arg == "-m") {
-			// Model name
-            modelPath = argv[i+1];
-        }
-        else if (arg == "-i") {
-			// Max iterations
-            maxIterations = atoi(argv[i+1]);
-        }
-        else if (arg == "-h") {
-			// Help
-            std::cout << "Usage:\n\nwall_follower [-i <max iterations>] [-m <model name>]\n\n";
-            return true;
-        }
-    }
-
-    std::cout << "MODEL: " << modelPath << "\n";
-    std::cout << "MAX ITERATIONS " << maxIterations << "\n";
-    return false;
-}
-
-
-
-double rad2deg (double rad){
-	return rad*180/M_PI;
-}
-
-
-
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz)
 {
     Eigen::Matrix4d uav_pose, uav2cam, cam_pose;
@@ -458,5 +407,4 @@ geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, V
     p.orientation.w = qt.getW();
 
     return p;
-
 }
