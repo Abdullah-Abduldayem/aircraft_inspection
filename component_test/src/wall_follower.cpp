@@ -46,6 +46,7 @@
 #include <pcl/common/transforms.h>
 #include <pcl/range_image/range_image.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/segmentation/extract_polygonal_prism_data.h>
 
 #include <pcl/features/normal_3d.h>
 
@@ -57,6 +58,8 @@ using namespace fcl;
 
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz);
 double rad2deg (double rad);
+double getDistanceXY(pcl::PointXYZ p1, pcl::PointXYZ p2);
+bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> cloud);
 
 std::string modelPath;
 int maxIterations;
@@ -64,6 +67,7 @@ float initial_x;
 float initial_y;
 float initial_z;
 float initial_yaw;
+float voxelRes;
 
 // Colors for console window
 const std::string cc_black("\033[0;30m");
@@ -92,6 +96,10 @@ double rad2deg (double rad) {
     return rad*180/M_PI;
 }
 
+double getDistanceXY(pcl::PointXYZ p1, pcl::PointXYZ p2){
+	return sqrt( (p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y) );
+}
+
 int main(int argc, char **argv)
 {
     // Parse inputs. Exit if help is used
@@ -114,6 +122,7 @@ int main(int argc, char **argv)
     nodeHandle.param<float>("initial_y", initial_y, 16);
     nodeHandle.param<float>("initial_z", initial_z, 4);
     nodeHandle.param<float>("initial_yaw", initial_yaw, 0);
+    nodeHandle.param<float>("voxelRes", voxelRes, 0.5f );
 
     // >>>>>>>>>>>>>>>>>
     // Variable declaration
@@ -161,7 +170,7 @@ int main(int argc, char **argv)
     pcl::io::loadPCDFile<pcl::PointXYZ> (path+"/src/pcd/" + modelPath, *originalCloud);
     std::cout<<"[] Loaded Model file\n";
 
-	std::cout<<"Initializing occlusion culler...\n";
+    std::cout<<"Initializing occlusion culler...\n";
     OcclusionCulling occlusionCulling(ros_node, modelPath);
     std::cout<<"[] Initialized occlusion culler\n";
 
@@ -190,9 +199,10 @@ int main(int argc, char **argv)
     // Control variables
     bool isSpinning = true;
     bool isTerminating = false;
-    double viewingAngle = -M_PI_4/2; //Used to keep the camera looking ahead so it doesn't crash into a wall
-
-    double maxRotationRate = M_PI_4;
+    //double viewingAngle = -M_PI_4/4; //Used to keep the camera looking ahead so it doesn't crash into a wall
+    double viewingAngle = 0;
+    double maxRotationRate = M_PI_4/2;
+    double spinningRate = M_PI_4/4;
 
     for (int viewPointCount=0; viewPointCount<maxIterations; viewPointCount++)
     {
@@ -200,7 +210,7 @@ int main(int argc, char **argv)
 
         // Initially spin in place to scan the surrounding area
         if (isSpinning) {
-            yaw += M_PI_4;
+            yaw += spinningRate;
 
             if (yaw >= 2*M_PI)
                 yaw -= 2*M_PI;
@@ -238,7 +248,7 @@ int main(int argc, char **argv)
 
 
 
-        // Find norm of observed area
+
         if (tempCloud.points.size() > 2) {
             // Stop spinning, found something
             isSpinning = false;
@@ -246,36 +256,86 @@ int main(int argc, char **argv)
             std::vector<int> indices;
             Eigen::Vector4f plane_parameters;
             float curvature;
+            Eigen::Vector4f centroid;
 
+            // Find norm of observed area
             indices.resize (tempCloud.points.size ());
             for (int i = 0; i < static_cast<int> (indices.size ()); ++i)
                 indices[i] = i;
 
             computePointNormal (tempCloud, indices, plane_parameters, curvature);
-            printf("Normal = [%f, %f, %f, %f]\n", plane_parameters[0], plane_parameters[1], plane_parameters[2], curvature);
+            printf("Normal = [%f, %f, %f]\n", plane_parameters[0], plane_parameters[1], plane_parameters[2]);
+            printf("Curvature = %f\n", curvature);
 
-            // Calculate normal of surface
-            yaw_wallNormal = atan2 (-plane_parameters[1], -plane_parameters[0]);
+            // Calculate normal angle (yaw) of surface
+            yaw_wallNormal = atan2 (plane_parameters[1], plane_parameters[0]);
             yaw_wallNormal = fmod(yaw_wallNormal + 2*M_PI, 2*M_PI); // Make it between 0 to 360
+
+            // Calculate planar distance
+            pcl::compute3DCentroid(tempCloud,centroid);
+            printf("Centroid = [%f, %f, %f]\n", centroid[0], centroid[1], centroid[2]);
+            float wall_distance = sqrt( (centroid[0]-pt.position.x)*(centroid[0]-pt.position.x) + (centroid[1]-pt.position.y)*(centroid[1]-pt.position.y) );
+            printf("Distance = %f\n", wall_distance);
+
+            // Move the robot to 1.5m away from the wall if it's too close or too far
+            bool wasMoved = false;
+            if (wall_distance >= 2.5 || wall_distance <= 1) {
+                float wall_direction[2];
+                wall_direction[0] = centroid[0]-pt.position.x;
+                wall_direction[1] = centroid[1]-pt.position.y;
+
+                pt.position.x += wall_direction[0]*(1-1.5/wall_distance);
+                pt.position.y += wall_direction[1]*(1-1.5/wall_distance);
+
+                pos_inc[0] = 0;
+                pos_inc[1] = 0;
+
+                std::cout << cc_yellow << "INFO: Moving to 1.5m away from wall\n" << cc_reset;
+                wasMoved = true;
+            }
+
+
+            // Is z component the most dominant? (ie. a floor or ceiling?)
+            // If so, ignore computed yaw and keep moving
+            if (fabs(plane_parameters[2]) > 0.5) {
+                std::cout << cc_yellow << "INFO: Ceiling/floor detected\n" << cc_reset;
+                continue;
+            }
+
+
+            // Test if shape is concave or convex
+            pcl::PointXYZ origin = pcl::PointXYZ (pt.position.x, pt.position.y, pt.position.z);
+            bool isConvex = checkIfConvex(origin, tempCloud);
+            if (isConvex /*pcl::isPointIn2DPolygon(origin, tempCloud)*/) {
+                std::cout << cc_green << "Convex\n" << cc_reset;
+            }
+            else {
+                std::cout << cc_green << "Concave\n" << cc_reset;
+                isConvex= true;
+            }
 
             // If the current yaw and desired yaw (wall normal) are far away, add a small increment to the yaw
             double angle_difference = yaw_wallNormal - yaw;
-
             printf("Desired Yaw = %f\n"
                    "Angle Diff = %f \n", rad2deg(yaw_wallNormal), rad2deg(angle_difference) );
 
             if (fabs(angle_difference) > maxRotationRate) {
-                yaw_inc = copysign(maxRotationRate, angle_difference);
+                //yaw_inc = copysign(maxRotationRate, angle_difference);
+                yaw_inc = spinningRate;
+
 
                 std::cout << cc_yellow << "INFO: Max rotation rate triggered\n" << cc_reset;
+                isSpinning = true;
             }
 
             // Otherwise use the normal as the new angle
             else {
-                yaw = yaw_wallNormal + viewingAngle;
+                yaw = yaw_wallNormal + copysign(viewingAngle, -angle_difference);
                 yaw_inc = 0;
+            }
 
-                // Move perpendicular to x-y of norm
+            // Move perpendicular to x-y of norm
+            if (!wasMoved) {
                 pos_inc[0] = sin(yaw_wallNormal);
                 pos_inc[1] = -cos(yaw_wallNormal);
             }
@@ -284,7 +344,7 @@ int main(int argc, char **argv)
             //pos_inc[2] = -plane_parameters[2];
         }
 
-		/*
+        /*
         // Lost track, didn't see anything, start spinning
         else {
             if (!isSpinning)
@@ -316,6 +376,9 @@ int main(int argc, char **argv)
             originalCloudPub.publish(cloud1);
             predictedCloudPub.publish(cloud2);
             sensorPosePub.publish(viewpoints);
+        }
+        else {
+            std::cout << cc_red << cc_bold << "Couldn't visualize data (rviz)\n";
         }
 
         if (isTerminating) {
@@ -353,6 +416,98 @@ int main(int argc, char **argv)
     std::cout<<"TEST predicted coverage percentage : "<<test<<"\n";
 
     return 0;
+}
+
+
+bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> cloud) {
+	pcl::PointCloud <pcl::PointXYZ>::Ptr cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
+    cloud_ptr->points = cloud.points;
+	
+    // Compute centroid of cloud
+    pcl::PointXYZ centroid;
+    centroid.x = 0;
+    centroid.y = 0;
+    centroid.z = 0;
+
+    for (int p=0; p<cloud.points.size(); p++) {
+        centroid.x += cloud.points[p].x;
+        centroid.y += cloud.points[p].y;
+        centroid.z += cloud.points[p].z;
+    }
+
+    centroid.x /= cloud.points.size();
+    centroid.y /= cloud.points.size();
+    centroid.z /= cloud.points.size();
+
+    cloud.push_back(centroid);
+
+
+	// Find closest point
+	pcl::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::KdTreeFLANN<pcl::PointXYZ>);
+	tree->setInputCloud(cloud_ptr);
+
+	std::vector<int> nn_indices (1);
+	std::vector<float> nn_dists (1);
+
+	tree->nearestKSearch(sensorPoint, 1, nn_indices, nn_dists); 
+	pcl::PointXYZ closest_pt = cloud_ptr->points[nn_indices[0]];
+	
+	// If points are close, just check proximity to centroid
+	double pt_dist = getDistanceXY(closest_pt, sensorPoint);
+	if (true){
+		std::cout << cc_green << "Triggered proximity convexity check\n" << cc_reset;
+		double dist_centroid_sensor = getDistanceXY(centroid, sensorPoint);
+		double dist_centroid_pt = getDistanceXY(centroid, closest_pt);
+		
+		if (dist_centroid_sensor > dist_centroid_pt)
+			return true;
+		else
+			return false;
+	}
+	
+    // Check if centroid is occluded (taken from occlussion_culling.cpp)
+    Eigen::Vector4f sensorLoc (sensorPoint.x, sensorPoint.y, sensorPoint.z, 0);
+
+    pcl::VoxelGridOcclusionEstimationT voxelFilter;
+    voxelFilter.setInputCloud (cloud_ptr);
+    voxelFilter.setLeafSize (voxelRes, voxelRes, voxelRes);
+    voxelFilter.initializeVoxelGrid();
+
+	
+    Eigen::Vector3i ijk = voxelFilter.getGridCoordinates( centroid.x, centroid.y, centroid.z);
+    if(voxelFilter.getCentroidIndexAt(ijk) == -1 ) {
+        // Voxel is out of bounds
+        std::cout << cc_red << cc_underline << "CONVEXITY CALCULATION FAILED (getCentroid)" << cc_reset;
+        return true;
+    }
+
+    Eigen::Vector4f voxel_coord = voxelFilter.getCentroidCoordinate (ijk);
+    // Estimate entry point into the voxel grid
+    pcl::PointXYZ p1,p2;
+    Eigen::Vector4f direction = voxel_coord - sensorLoc;
+    
+    float tmin = voxelFilter.rayBoxIntersection (sensorLoc, direction,p1,p2);
+
+    if(tmin == -1) {
+        // ray does not intersect with the bounding box
+        std::cout << cc_red << cc_underline << "CONVEXITY CALCULATION FAILED (tmin)" << cc_reset;
+        return true;
+    }
+
+    // Calculate coordinate of the boundary of the voxel grid
+    Eigen::Vector4f start = sensorLoc + tmin * direction;
+
+    // Determine distance between boundary and target voxel centroid
+    Eigen::Vector4f dist_vector = voxel_coord-start;
+    float distance = (dist_vector).dot(dist_vector);
+
+    if (distance > voxelRes) { // voxelRes/sqrt(2)
+        // ray does not correspond to this point
+        return true;
+    }
+	
+    return false;
+
 }
 
 
