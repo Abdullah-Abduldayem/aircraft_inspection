@@ -59,8 +59,6 @@ using namespace fcl;
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz);
 double rad2deg (double rad);
 double getDistanceXY(pcl::PointXYZ p1, pcl::PointXYZ p2);
-bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> cloud);
-Eigen::Vector3f getSummedDirectionToPoint(pcl::PointXYZ point, pcl::PointCloud<pcl::PointXYZ> cloud);
 
 std::string modelPath;
 int maxIterations;
@@ -200,10 +198,11 @@ int main(int argc, char **argv)
     // Control variables
     bool isSpinning = true;
     bool isTerminating = false;
-    //double viewingAngle = -M_PI_4/4; //Used to keep the camera looking ahead so it doesn't crash into a wall
-    double viewingAngle = 0;
+    double viewingAngle = -M_PI_4/2; //Used to keep the camera looking ahead so it doesn't crash into a wall
+    //double viewingAngle = 0;
     double maxRotationRate = M_PI_4/2;
     double spinningRate = M_PI_4/4;
+    double moveSpeed = 1;
 
     for (int viewPointCount=0; viewPointCount<maxIterations; viewPointCount++)
     {
@@ -224,9 +223,6 @@ int main(int argc, char **argv)
             pt.position.z += pos_inc[2];
             yaw += yaw_inc;
         }
-
-        printf("[x, y, z, yaw] = [%f,\t%f,\t%f,\t%f] \n",
-               pt.position.x, pt.position.y, pt.position.z, rad2deg(yaw));
 
         // Generate quaterion
         tf::Quaternion tf_q ;
@@ -273,11 +269,15 @@ int main(int argc, char **argv)
             yaw_wallNormal = fmod(yaw_wallNormal + 2*M_PI, 2*M_PI); // Make it between 0 to 360
 
             // Calculate planar distance
+            printf("[x, y, z]= [%f, %f, %f]\n",
+               pt.position.x, pt.position.y, pt.position.z);
+            
             pcl::compute3DCentroid(tempCloud,centroid);
             printf("Centroid = [%f, %f, %f]\n", centroid[0], centroid[1], centroid[2]);
             float wall_distance = sqrt( (centroid[0]-pt.position.x)*(centroid[0]-pt.position.x) + (centroid[1]-pt.position.y)*(centroid[1]-pt.position.y) );
             printf("Distance = %f\n", wall_distance);
 
+			/*
             // Move the robot to 1.5m away from the wall if it's too close or too far
             bool wasMoved = false;
             if (wall_distance >= 2.5 || wall_distance <= 1) {
@@ -294,6 +294,7 @@ int main(int argc, char **argv)
                 std::cout << cc_yellow << "INFO: Moving to 1.5m away from wall\n" << cc_reset;
                 wasMoved = true;
             }
+            */
 
 
             // Is z component the most dominant? (ie. a floor or ceiling?)
@@ -304,22 +305,14 @@ int main(int argc, char **argv)
             }
 
 
-            // Test if shape is concave or convex
-            pcl::PointXYZ origin = pcl::PointXYZ (pt.position.x, pt.position.y, pt.position.z);
-            bool isConvex = checkIfConvex(origin, tempCloud);
-            if (isConvex /*pcl::isPointIn2DPolygon(origin, tempCloud)*/) {
-                std::cout << cc_green << "Convex\n" << cc_reset;
-            }
-            else {
-                std::cout << cc_green << "Concave\n" << cc_reset;
-                isConvex= true;
-            }
-
             // If the current yaw and desired yaw (wall normal) are far away, add a small increment to the yaw
             double angle_difference = yaw_wallNormal - yaw;
-            printf("Desired Yaw = %f\n"
-                   "Angle Diff = %f \n", rad2deg(yaw_wallNormal), rad2deg(angle_difference) );
+            printf("\nCurrent yaw = %f\n"
+				   "Desired yaw = %f\n"
+                   "Angle Diff = %f \n", rad2deg(yaw), rad2deg(yaw_wallNormal), rad2deg(angle_difference) );
 
+			
+			/*
             if (fabs(angle_difference) > maxRotationRate) {
                 //yaw_inc = copysign(maxRotationRate, angle_difference);
                 yaw_inc = spinningRate;
@@ -334,25 +327,57 @@ int main(int argc, char **argv)
                 yaw = yaw_wallNormal + copysign(viewingAngle, -angle_difference);
                 yaw_inc = 0;
             }
+            */
+            
+            // Use the normal as the new angle
+            //yaw = yaw_wallNormal + copysign(viewingAngle, angle_difference);
+            yaw = yaw_wallNormal + viewingAngle;
 
-            // Move perpendicular to x-y of norm
-            if (!wasMoved) {
-                pos_inc[0] = sin(yaw_wallNormal);
-                pos_inc[1] = -cos(yaw_wallNormal);
-            }
+            // Move perpendicular to x-y of norm so that we line up with the wall's norm
+            
+			// Normalize norm
+			double d = 1.5; //1.5 meters away from wall
+			
+			double k = sqrt(d*d /(plane_parameters[0]*plane_parameters[0] + plane_parameters[1]*plane_parameters[1]) );
+			
+			
+			pos_inc[0] = centroid[0] - pt.position.x + k*plane_parameters[0];
+			pos_inc[1] = centroid[1] - pt.position.y - k*plane_parameters[1];
+			
+			std::cout << cc_red << "inc = [" << pos_inc[0] << ", " << pos_inc[1] << "]\n" << cc_reset;
+            
+            // nudge the position if the curvature is too high (convex corners are problematic)
+            if ( curvature > 0.02){
+				std::cout << cc_red << "Curvature exceeded, nudging\n" << cc_reset;
+				pos_inc[0] += -plane_parameters[1];
+				pos_inc[1] += plane_parameters[0];
+				std::cout << cc_red << "inc = [" << pos_inc[0] << ", " << pos_inc[1] << "]\n" << cc_reset;
+			}
+			
+			// If we're moving very little, amplify the motion
+			if(!isSpinning){
+				double inc_dist = sqrt(pos_inc[0]*pos_inc[0] + pos_inc[1]*pos_inc[1]);
+				if (inc_dist < 0.5){
+					pos_inc[0] /= inc_dist;
+					pos_inc[1] /= inc_dist;
+					
+					std::cout << cc_red << "Small motion, boosting\n" << cc_reset;
+					std::cout << cc_red << "inc = [" << pos_inc[0] << ", " << pos_inc[1] << "]\n" << cc_reset;
+				}
+			}
 
             // Move vertically opposite of norm (objective is to look directly at flat part of object, not above or below)
             //pos_inc[2] = -plane_parameters[2];
         }
 
-        /*
+        
         // Lost track, didn't see anything, start spinning
         else {
-            if (!isSpinning)
-            	isTerminating = true;
-            //isSpinning = true;
+            //if (!isSpinning)
+            //	isTerminating = true;
+            isSpinning = true;
         }
-        */
+        
 
 
 
@@ -417,82 +442,6 @@ int main(int argc, char **argv)
     std::cout<<"TEST predicted coverage percentage : "<<test<<"\n";
 
     return 0;
-}
-
-
-bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> cloud) {
-	pcl::PointCloud <pcl::PointXYZ>::Ptr cloud_ptr(new pcl::PointCloud<pcl::PointXYZ>);
-    cloud_ptr->points = cloud.points;
-	
-    // Compute centroid of cloud
-    pcl::PointXYZ centroid;
-    centroid.x = 0;
-    centroid.y = 0;
-    centroid.z = 0;
-
-    for (int p=0; p<cloud.points.size(); p++) {
-        centroid.x += cloud.points[p].x;
-        centroid.y += cloud.points[p].y;
-        centroid.z += cloud.points[p].z;
-    }
-
-    centroid.x /= cloud.points.size();
-    centroid.y /= cloud.points.size();
-    centroid.z /= cloud.points.size();
-
-    cloud.push_back(centroid);
-
-
-	// Find closest point 
-	pcl::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::KdTreeFLANN<pcl::PointXYZ>); 
-	tree->setInputCloud(cloud_ptr); 
-	std::vector<int> nn_indices (1); 
-	std::vector<float> nn_dists (1); 
-	
-	tree->nearestKSearch(sensorPoint, 1, nn_indices, nn_dists);  
-	pcl::PointXYZ closest_pt = cloud_ptr->points[nn_indices[0]]; 
-
-	// Find angles between closest_pt and centroid/sensor
-	float angle_sensor = atan2 (closest_pt.y-sensorPoint.y, closest_pt.x-sensorPoint.x);
-	float angle_centroid = atan2 (closest_pt.y-centroid.y, closest_pt.x-centroid.x);
-	
-	angle_sensor = fmod(angle_sensor + 2*M_PI, 2*M_PI); // Make it between 0 to 360
-	angle_centroid = fmod(angle_centroid + 2*M_PI, 2*M_PI); // Make it between 0 to 360
-	
-	
-	float angle_diff = fmod(angle_sensor - angle_centroid+ 2*M_PI, 2*M_PI);
-	std::cout << cc_green << "Angle Diff: " << angle_diff << "\n" << cc_reset;
-	
-	/*
-	Eigen::Vector3f dir_centroid = getSummedDirectionToPoint(centroid, cloud);
-	Eigen::Vector3f dir_sensor = getSummedDirectionToPoint(sensorPoint, cloud);
-
-	printf("Dir1: [%f, %f, %f]\n", dir_centroid[0], dir_centroid[1], dir_centroid[2]);
-	printf("Dir2: [%f, %f, %f]\n", dir_sensor[0], dir_sensor[1], dir_sensor[2]);
-
-	// Find angle difference
-	float angle1 = atan2 (dir_centroid[1], dir_centroid[0]);
-	float angle2 = atan2 (dir_sensor[1], dir_sensor[0]);
-	std::cout << cc_green << "Angle1: " << angle1 << "\n" << cc_reset;
-	std::cout << cc_green << "Angle2: " << angle2 << "\n" << cc_reset;
-	return true;
-	*/
-}
-
-
-Eigen::Vector3f getSummedDirectionToPoint(pcl::PointXYZ point, pcl::PointCloud<pcl::PointXYZ> cloud){
-	Eigen::Vector3f out(0,0,0);
-	
-	cout << out[0] << "\n";
-	
-	int i;
-	for (i=0; i<cloud.points.size(); i++){
-		out[0] += point.x - cloud.points[i].x;
-		out[1] += point.y - cloud.points[i].y;
-		out[2] += point.z - cloud.points[i].z;
-	}
-	
-	out.normalize();
 }
 
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz)
