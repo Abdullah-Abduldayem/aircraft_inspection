@@ -60,6 +60,7 @@ geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, V
 double rad2deg (double rad);
 double getDistanceXY(pcl::PointXYZ p1, pcl::PointXYZ p2);
 bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> cloud);
+Eigen::Vector3f getSummedDirectionToPoint(pcl::PointXYZ point, pcl::PointCloud<pcl::PointXYZ> cloud);
 
 std::string modelPath;
 int maxIterations;
@@ -442,74 +443,57 @@ bool checkIfConvex(pcl::PointXYZ sensorPoint, pcl::PointCloud<pcl::PointXYZ> clo
     cloud.push_back(centroid);
 
 
-	// Find closest point
-	pcl::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::KdTreeFLANN<pcl::PointXYZ>);
-	tree->setInputCloud(cloud_ptr);
-
-	std::vector<int> nn_indices (1);
-	std::vector<float> nn_dists (1);
-
-	tree->nearestKSearch(sensorPoint, 1, nn_indices, nn_dists); 
-	pcl::PointXYZ closest_pt = cloud_ptr->points[nn_indices[0]];
+	// Find closest point 
+	pcl::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::KdTreeFLANN<pcl::PointXYZ>); 
+	tree->setInputCloud(cloud_ptr); 
+	std::vector<int> nn_indices (1); 
+	std::vector<float> nn_dists (1); 
 	
-	// If points are close, just check proximity to centroid
-	double pt_dist = getDistanceXY(closest_pt, sensorPoint);
-	if (true){
-		std::cout << cc_green << "Triggered proximity convexity check\n" << cc_reset;
-		double dist_centroid_sensor = getDistanceXY(centroid, sensorPoint);
-		double dist_centroid_pt = getDistanceXY(centroid, closest_pt);
-		
-		if (dist_centroid_sensor > dist_centroid_pt)
-			return true;
-		else
-			return false;
-	}
+	tree->nearestKSearch(sensorPoint, 1, nn_indices, nn_dists);  
+	pcl::PointXYZ closest_pt = cloud_ptr->points[nn_indices[0]]; 
+
+	// Find angles between closest_pt and centroid/sensor
+	float angle_sensor = atan2 (closest_pt.y-sensorPoint.y, closest_pt.x-sensorPoint.x);
+	float angle_centroid = atan2 (closest_pt.y-centroid.y, closest_pt.x-centroid.x);
 	
-    // Check if centroid is occluded (taken from occlussion_culling.cpp)
-    Eigen::Vector4f sensorLoc (sensorPoint.x, sensorPoint.y, sensorPoint.z, 0);
-
-    pcl::VoxelGridOcclusionEstimationT voxelFilter;
-    voxelFilter.setInputCloud (cloud_ptr);
-    voxelFilter.setLeafSize (voxelRes, voxelRes, voxelRes);
-    voxelFilter.initializeVoxelGrid();
-
+	angle_sensor = fmod(angle_sensor + 2*M_PI, 2*M_PI); // Make it between 0 to 360
+	angle_centroid = fmod(angle_centroid + 2*M_PI, 2*M_PI); // Make it between 0 to 360
 	
-    Eigen::Vector3i ijk = voxelFilter.getGridCoordinates( centroid.x, centroid.y, centroid.z);
-    if(voxelFilter.getCentroidIndexAt(ijk) == -1 ) {
-        // Voxel is out of bounds
-        std::cout << cc_red << cc_underline << "CONVEXITY CALCULATION FAILED (getCentroid)" << cc_reset;
-        return true;
-    }
-
-    Eigen::Vector4f voxel_coord = voxelFilter.getCentroidCoordinate (ijk);
-    // Estimate entry point into the voxel grid
-    pcl::PointXYZ p1,p2;
-    Eigen::Vector4f direction = voxel_coord - sensorLoc;
-    
-    float tmin = voxelFilter.rayBoxIntersection (sensorLoc, direction,p1,p2);
-
-    if(tmin == -1) {
-        // ray does not intersect with the bounding box
-        std::cout << cc_red << cc_underline << "CONVEXITY CALCULATION FAILED (tmin)" << cc_reset;
-        return true;
-    }
-
-    // Calculate coordinate of the boundary of the voxel grid
-    Eigen::Vector4f start = sensorLoc + tmin * direction;
-
-    // Determine distance between boundary and target voxel centroid
-    Eigen::Vector4f dist_vector = voxel_coord-start;
-    float distance = (dist_vector).dot(dist_vector);
-
-    if (distance > voxelRes) { // voxelRes/sqrt(2)
-        // ray does not correspond to this point
-        return true;
-    }
 	
-    return false;
+	float angle_diff = fmod(angle_sensor - angle_centroid+ 2*M_PI, 2*M_PI);
+	std::cout << cc_green << "Angle Diff: " << angle_diff << "\n" << cc_reset;
+	
+	/*
+	Eigen::Vector3f dir_centroid = getSummedDirectionToPoint(centroid, cloud);
+	Eigen::Vector3f dir_sensor = getSummedDirectionToPoint(sensorPoint, cloud);
 
+	printf("Dir1: [%f, %f, %f]\n", dir_centroid[0], dir_centroid[1], dir_centroid[2]);
+	printf("Dir2: [%f, %f, %f]\n", dir_sensor[0], dir_sensor[1], dir_sensor[2]);
+
+	// Find angle difference
+	float angle1 = atan2 (dir_centroid[1], dir_centroid[0]);
+	float angle2 = atan2 (dir_sensor[1], dir_sensor[0]);
+	std::cout << cc_green << "Angle1: " << angle1 << "\n" << cc_reset;
+	std::cout << cc_green << "Angle2: " << angle2 << "\n" << cc_reset;
+	return true;
+	*/
 }
 
+
+Eigen::Vector3f getSummedDirectionToPoint(pcl::PointXYZ point, pcl::PointCloud<pcl::PointXYZ> cloud){
+	Eigen::Vector3f out(0,0,0);
+	
+	cout << out[0] << "\n";
+	
+	int i;
+	for (i=0; i<cloud.points.size(); i++){
+		out[0] += point.x - cloud.points[i].x;
+		out[1] += point.y - cloud.points[i].y;
+		out[2] += point.z - cloud.points[i].z;
+	}
+	
+	out.normalize();
+}
 
 geometry_msgs::Pose uav2camTransformation(geometry_msgs::Pose pose, Vec3f rpy, Vec3f xyz)
 {
