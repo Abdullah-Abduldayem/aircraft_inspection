@@ -38,10 +38,6 @@ add_definitions(${PCL_DEFINITIONS})
 
 
 
-#add_executable(wall_follower src/wall_follower.cpp)
-#add_dependencies(wall_follower ${catkin_EXPORTED_TARGETS})
-#target_link_libraries(wall_follower ${catkin_LIBRARIES} -lgmp -lmpfr ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OCTOMAP_LIBRARIES} ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
-
-add_executable(nbv_loop src/nbv_loop.cpp)
-add_dependencies(nbv_loop ${catkin_EXPORTED_TARGETS})
-target_link_libraries(nbv_loop ${catkin_LIBRARIES} -lgmp -lmpfr ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OCTOMAP_LIBRARIES} ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+add_executable(wall_follower src/wall_follower.cpp)
+add_dependencies(wall_follower ${catkin_EXPORTED_TARGETS})
+target_link_libraries(wall_follower ${catkin_LIBRARIES} -lgmp -lmpfr ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OCTOMAP_LIBRARIES} ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
