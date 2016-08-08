@@ -20,8 +20,10 @@
 #include <tf_conversions/tf_eigen.h>
 
 //PCL
+//#include <pcl/filters.hpp>
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/filters/filter.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/voxel_grid_occlusion_estimation.h>
 #include <pcl/registration/icp.h>
@@ -88,7 +90,9 @@ float initial_yaw;
 float voxelRes;
 */
 
+// =========================
 // Colors for console window
+// =========================
 const std::string cc_black("\033[0;30m");
 const std::string cc_red("\033[0;31m");
 const std::string cc_green("\033[1;32m");
@@ -109,18 +113,18 @@ const std::string cc_reset("\033[0m");
 
 
 // Create a state machine
-enum class NBV_STATE {
-    NOT_STARTED,
-    INITIALIZING,
-    IDLE,
-    SENSING, DONE_SENSING,
-    MAPPING, DONE_MAPPING,
-    VIEWPOINT_GENERATION, DONE_VIEWPOINT_GENERATION, 
-    VIEWPOINT_EVALUATION, DONE_VIEWPOINT_EVALUATION,
-    PATH_PLANNING,
-    MOVING, DONE_MOVING,
-    TERMINATION_CHECK, TERMINATION_MET, TERMINATION_NOT_MET};
-NBV_STATE state = NBV_STATE::NOT_STARTED;
+enum NBV_STATE {
+    NBV_STATE_NOT_STARTED,
+    NBV_STATE_INITIALIZING,
+    NBV_STATE_IDLE,
+    NBV_STATE_SENSING, NBV_STATE_DONE_SENSING,
+    NBV_STATE_MAPPING, NBV_STATE_DONE_MAPPING,
+    NBV_STATE_VIEWPOINT_GENERATION, NBV_STATE_DONE_VIEWPOINT_GENERATION, 
+    NBV_STATE_VIEWPOINT_EVALUATION, NBV_STATE_DONE_VIEWPOINT_EVALUATION,
+    NBV_STATE_PATH_PLANNING,
+    NBV_STATE_MOVING, NBV_STATE_DONE_MOVING,
+    NBV_STATE_TERMINATION_CHECK, NBV_STATE_TERMINATION_MET, NBV_STATE_TERMINATION_NOT_MET};
+NBV_STATE state = NBV_STATE_NOT_STARTED;
 
 /*
 double randomDouble(double min, double max) {
@@ -144,11 +148,11 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_sensed(new pcl::PointCloud<pcl::Poi
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
 
 //pcl::VoxelGrid<pcl::PointXYZRGB> occGrid;
-//pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
 
 float res = 0.1f; //Voxel grid resolution
 int count = 0;
 
+bool isDebug = true; //Set to true to see debug text
 
 // Prototype
 void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
@@ -173,7 +177,7 @@ int main(int argc, char **argv)
     // >>>>>>>>>>>>>>>>>
     // Initialize ROS
     // >>>>>>>>>>>>>>>>>
-    state = NBV_STATE::INITIALIZING;
+    state = NBV_STATE_INITIALIZING;
     
     std::cout << cc_red << "BEGIN NBV LOOP\n" << cc_reset;
 
@@ -188,47 +192,47 @@ int main(int argc, char **argv)
 
 
     // Start the FSM
-    state = NBV_STATE::IDLE;
+    state = NBV_STATE_IDLE;
     
     ros::Rate loop_rate(10);
     while (ros::ok() && !isTerminating)
     {
         switch(state){
-            case NBV_STATE::IDLE:
-            case NBV_STATE::DONE_MOVING:
-                state = NBV_STATE::SENSING;
+            case NBV_STATE_IDLE:
+            case NBV_STATE_DONE_MOVING:
+                state = NBV_STATE_SENSING;
                 
                 iteration_count++;
                 std::cout << cc_yellow << "Iteration: " << iteration_count << "\n" << cc_reset;
                 break;
                 
-            case NBV_STATE::DONE_SENSING:
-                state = NBV_STATE::MAPPING;
+            case NBV_STATE_DONE_SENSING:
+                state = NBV_STATE_MAPPING;
                 addToGlobalCloud(cloud_sensed);
                 break;
             
-            case NBV_STATE::DONE_MAPPING:
-                state = NBV_STATE::TERMINATION_CHECK;
+            case NBV_STATE_DONE_MAPPING:
+                state = NBV_STATE_TERMINATION_CHECK;
                 termination_check();
                 break;
                 
-            case NBV_STATE::TERMINATION_MET:
+            case NBV_STATE_TERMINATION_MET:
                 isTerminating = true;
                 std::cout << cc_yellow << "Termination condition met\n" << cc_reset;
                 break;
                 
-            case NBV_STATE::TERMINATION_NOT_MET:
-                state = NBV_STATE::VIEWPOINT_GENERATION;
+            case NBV_STATE_TERMINATION_NOT_MET:
+                state = NBV_STATE_VIEWPOINT_GENERATION;
                 generate_viewpoints();
                 break;
                 
-            case NBV_STATE::DONE_VIEWPOINT_GENERATION:
-                state = NBV_STATE::VIEWPOINT_EVALUATION;
+            case NBV_STATE_DONE_VIEWPOINT_GENERATION:
+                state = NBV_STATE_VIEWPOINT_EVALUATION;
                 evaluate_viewpoints();
                 break;
             
-            case NBV_STATE::DONE_VIEWPOINT_EVALUATION:
-                state = NBV_STATE::MOVING;
+            case NBV_STATE_DONE_VIEWPOINT_EVALUATION:
+                state = NBV_STATE_MOVING;
                 set_waypoint();
                 break;
         }
@@ -244,7 +248,9 @@ int main(int argc, char **argv)
 // Update global position of UGV
 void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 {
-    std::cout << cc_magenta << "Grabbing location\n" << cc_reset;
+    if (isDebug){
+        std::cout << cc_magenta << "Grabbing location\n" << cc_reset;
+    }
     
     /*
     // Save UGV pose
@@ -263,67 +269,72 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 
 void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 {
-    if (state != NBV_STATE::SENSING){
+    if (state != NBV_STATE_SENSING){
+        //std::cout << cc_red << "ERROR: Attempt to sense out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "SENSING\n" << cc_reset;
+    if (isDebug){
+        std::cout << cc_green << "SENSING\n" << cc_reset;
+    }
     
     
-    //*
     pcl::PointCloud<pcl::PointXYZRGB> cloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_ptr;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered_ptr;
 
-    // Convert to pcl pointcloud
+    // == Convert to pcl pointcloud
     pcl::fromROSMsg (*cloud_msg, cloud);
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPtr = cloud.makeShared();
+    cloud_ptr = cloud.makeShared();
 
+    //std::cout << cc_blue << "Number of points detected: " << cloud_ptr->points.size() << "\n" << cc_reset;
     
-    // @todo: anything beyond this point causes the software to crash
-    // Looks like the pointcloud doesn't play nice.
-    // Try checking if the cloud is even valid. List the points and their coordinates
-    
-    // Remove NAN points
+    // == Remove NAN points
     std::vector<int> indices;
-    //pcl::removeNaNFromPointCloud(*cloudPtr,*cloudPtr, indices);
-
-    /*
-    // Perform voxelgrid filtering
+    pcl::removeNaNFromPointCloud(*cloud_ptr,*cloud_ptr, indices);
+    //std::cout << cc_blue << "Number of points remaining: " << cloud_ptr->points.size() << "\n" << cc_reset;
+    
+    
+    
+    // == Perform voxelgrid filtering
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
 
     pcl::VoxelGrid<pcl::PointXYZRGB> sor;
-    sor.setInputCloud (cloudPtr);
+    sor.setInputCloud (cloud_ptr);
     sor.setLeafSize (res, res, res);
     sor.filter (*cloud_filtered);
-    //*/
     
-    state = NBV_STATE::DONE_SENSING;
+    //std::cout << cc_blue << "Number of points remaining: " << cloud_filtered->points.size() << "\n" << cc_reset;
     
-    /*
-    // Add filtered to global
-    state = NBV_STATE::MAPPING;
+    
+    // == Signal end of sensing
+    state = NBV_STATE_DONE_SENSING;
+    
+    
+    // == Add filtered to global
+    state = NBV_STATE_MAPPING;
     addToGlobalCloud(cloud_filtered);
-    */
 }
 
 
 void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
-    if (state != NBV_STATE::MAPPING){
+    if (state != NBV_STATE_MAPPING){
+        std::cout << cc_red << "ERROR: Attempt to map out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "MAPPING\n" << cc_reset;
+    
+    if (isDebug){
+        std::cout << cc_green << "MAPPING\n" << cc_reset;
+    }
     
     // Initialize global cloud if not already done so
-    /*
     if (!globalCloudPtr){
         globalCloudPtr = cloud_in;
+        state = NBV_STATE_DONE_MAPPING;
+        
         return;
     }
 
     *globalCloudPtr += *cloud_in;
-    */
-
-
-
-
 
 
 
@@ -366,14 +377,7 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
 
 
 
-
-
-
-
-
-
     // Perform voxelgrid filtering
-    /*
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
 
 
@@ -383,59 +387,68 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
     sor.filter (*cloud_filtered);
 
     globalCloudPtr = cloud_filtered;
-    */
     
-    state = NBV_STATE::DONE_MAPPING;
+    
+    
+    
+    state = NBV_STATE_DONE_MAPPING;
 }
 
 
 void termination_check(){
-    if (state != NBV_STATE::TERMINATION_CHECK){
+    if (state != NBV_STATE_TERMINATION_CHECK){
         std::cout << cc_red << "ERROR: Attempt to check termination out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "Checking termination condition\n" << cc_reset;
+    if (isDebug){
+        std::cout << cc_green << "Checking termination condition\n" << cc_reset;
+    }
     
     
     if (iteration_count > max_iterations){
-        state = NBV_STATE::TERMINATION_MET;
+        state = NBV_STATE_TERMINATION_MET;
     }
     else{
-        state = NBV_STATE::TERMINATION_NOT_MET;
+        state = NBV_STATE_TERMINATION_NOT_MET;
     }
 }
 
 
 void generate_viewpoints(){
-    if (state != NBV_STATE::VIEWPOINT_GENERATION){
+    if (state != NBV_STATE_VIEWPOINT_GENERATION){
         std::cout << cc_red << "ERROR: Attempt to generate viewpoints out of order\n" << cc_reset;
         return;
     }
     std::cout << cc_green << "Generating viewpoints\n" << cc_reset;
     
-    state = NBV_STATE::DONE_VIEWPOINT_GENERATION;
+    state = NBV_STATE_DONE_VIEWPOINT_GENERATION;
 }
 
 
 void evaluate_viewpoints(){
-    if (state != NBV_STATE::VIEWPOINT_EVALUATION){
+    if (state != NBV_STATE_VIEWPOINT_EVALUATION){
         std::cout << cc_red << "ERROR: Attempt to evaluate viewpoints out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "Evaluating viewpoints\n" << cc_reset;
+    if (isDebug){
+        std::cout << cc_green << "Evaluating viewpoints\n" << cc_reset;
+    }
     
-    state = NBV_STATE::DONE_VIEWPOINT_EVALUATION;
+    state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
 }
 
 
 void set_waypoint(){
-    if (state != NBV_STATE::MOVING){
+    if (state != NBV_STATE_MOVING){
         std::cout << cc_red << "ERROR: Attempt to move vehicle out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "Moving (setting waypoints)\n" << cc_reset;
+    if (isDebug){
+        std::cout << cc_green << "Moving (setting waypoints)\n" << cc_reset;
+    }
     
-    state = NBV_STATE::DONE_MOVING;
+    
+    state = NBV_STATE_DONE_MOVING;
 }
 
 
