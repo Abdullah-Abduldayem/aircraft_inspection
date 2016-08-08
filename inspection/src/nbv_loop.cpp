@@ -112,7 +112,51 @@ const std::string cc_erase_line("\033[2K");
 const std::string cc_reset("\033[0m");
 
 
+// ===================
+// === Variables  ====
+// ===================
+bool isDebug = true; //Set to true to see debug text
+
+// == Consts
+std::string depth_topic   = "/iris/xtion_sensor/iris/xtion_sensor_camera/depth/points";
+std::string position_topic = "/iris/ground_truth/pose";
+
+// == Termination variables
+bool isTerminating = false;
+int iteration_count = 0;
+int max_iterations = 100;
+
+// == Publishers
+ros::Publisher pub_global_cloud;
+
+// == Subscriptions
+geometry_msgs::Pose mobile_base_pose;
+geometry_msgs::Pose mobile_base_pose_prev;
+
+// == Point clouds
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_sensed(new pcl::PointCloud<pcl::PointXYZRGB>);
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
+//pcl::VoxelGrid<pcl::PointXYZRGB> occGrid;
+
+float pc_res = 0.1f; //Voxel grid resolution
+
+
+
+// ======================
+// Function prototypes (@todo: move to header file)
+// ======================
+
+void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
+void positionCallback(const geometry_msgs::PoseStamped& pose_msg);
+void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in);
+void termination_check();
+void generate_viewpoints();
+void evaluate_viewpoints();
+void set_waypoint();
+
+// ======================
 // Create a state machine
+// ======================
 enum NBV_STATE {
     NBV_STATE_NOT_STARTED,
     NBV_STATE_INITIALIZING,
@@ -126,6 +170,9 @@ enum NBV_STATE {
     NBV_STATE_TERMINATION_CHECK, NBV_STATE_TERMINATION_MET, NBV_STATE_TERMINATION_NOT_MET};
 NBV_STATE state = NBV_STATE_NOT_STARTED;
 
+// ================
+// Functions
+// ================
 /*
 double randomDouble(double min, double max) {
     return ((double) random()/RAND_MAX)*(max-min) + min;
@@ -140,37 +187,6 @@ double getDistanceXY(pcl::PointXYZ p1, pcl::PointXYZ p2){
 }
 */
 
-geometry_msgs::Pose mobile_base_pose;
-geometry_msgs::Pose mobile_base_pose_prev;
-
-
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_sensed(new pcl::PointCloud<pcl::PointXYZRGB>);
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
-
-//pcl::VoxelGrid<pcl::PointXYZRGB> occGrid;
-
-float res = 0.1f; //Voxel grid resolution
-int count = 0;
-
-bool isDebug = true; //Set to true to see debug text
-
-// Prototype
-void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
-void positionCallback(const geometry_msgs::PoseStamped& pose_msg);
-void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in);
-void termination_check();
-void generate_viewpoints();
-void evaluate_viewpoints();
-void set_waypoint();
-
-// Consts
-std::string depth_topic   = "/iris/xtion_sensor/iris/xtion_sensor_camera/depth/points";
-std::string position_topic = "/iris/ground_truth/pose";
-
-// Termination variables
-bool isTerminating = false;
-int iteration_count = 0;
-int max_iterations = 10;
 
 int main(int argc, char **argv)
 {
@@ -187,6 +203,8 @@ int main(int argc, char **argv)
     ros::Subscriber sub_kinect = ros_node.subscribe(depth_topic, 1, depthCallback);
     ros::Subscriber sub_pose = ros_node.subscribe(position_topic, 1, positionCallback);
 
+    
+    pub_global_cloud = ros_node.advertise<sensor_msgs::PointCloud2>("/global_cloud", 10);
     //pub = ros_node.advertise<sensor_msgs::PointCloud2> ("/voxgrid", 1);
     //pub_pose = ros_node.advertise<geometry_msgs::PoseStamped> ("/voxgrid/pose", 1);
 
@@ -300,7 +318,7 @@ void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 
     pcl::VoxelGrid<pcl::PointXYZRGB> sor;
     sor.setInputCloud (cloud_ptr);
-    sor.setLeafSize (res, res, res);
+    sor.setLeafSize (pc_res, pc_res, pc_res);
     sor.filter (*cloud_filtered);
     
     //std::cout << cc_blue << "Number of points remaining: " << cloud_filtered->points.size() << "\n" << cc_reset;
@@ -383,14 +401,26 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
 
     pcl::VoxelGrid<pcl::PointXYZRGB> sor;
     sor.setInputCloud (globalCloudPtr);
-    sor.setLeafSize (res, res, res);
+    sor.setLeafSize (pc_res, pc_res, pc_res);
     sor.filter (*cloud_filtered);
 
     globalCloudPtr = cloud_filtered;
     
+    std::cout << cc_blue << "Number of points in global map: " << globalCloudPtr->points.size() << "\n" << cc_reset;
     
     
     
+    // Publish
+    sensor_msgs::PointCloud2 cloud_msg;
+    
+    pcl::toROSMsg(*globalCloudPtr, cloud_msg); 	//cloud of original (white) using original cloud
+    cloud_msg.header.frame_id = "world";
+    cloud_msg.header.stamp = ros::Time::now();
+    
+    pub_global_cloud.publish(cloud_msg);
+    
+    
+    // Signal task completion
     state = NBV_STATE_DONE_MAPPING;
 }
 
