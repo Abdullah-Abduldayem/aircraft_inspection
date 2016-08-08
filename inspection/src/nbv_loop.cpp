@@ -141,7 +141,7 @@ geometry_msgs::Pose mobile_base_pose_prev;
 
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_sensed(new pcl::PointCloud<pcl::PointXYZRGB>);
-//pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
 
 //pcl::VoxelGrid<pcl::PointXYZRGB> occGrid;
 //pcl::PointCloud<pcl::PointXYZRGB>::Ptr globalCloudPtr;
@@ -151,7 +151,7 @@ int count = 0;
 
 
 // Prototype
-void depthCallback(const sensor_msgs::PointCloud2& cloud_msg);
+void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg);
 void positionCallback(const geometry_msgs::PoseStamped& pose_msg);
 void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in);
 void termination_check();
@@ -261,25 +261,31 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
     */
 }
 
-void depthCallback(const sensor_msgs::PointCloud2& cloud_msg)
+void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 {
     if (state != NBV_STATE::SENSING){
         return;
     }
     std::cout << cc_green << "SENSING\n" << cc_reset;
     
-    /*
+    
+    //*
     pcl::PointCloud<pcl::PointXYZRGB> cloud;
 
     // Convert to pcl pointcloud
-    pcl::fromROSMsg (cloud_msg, cloud);
+    pcl::fromROSMsg (*cloud_msg, cloud);
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPtr = cloud.makeShared();
 
+    
+    // @todo: anything beyond this point causes the software to crash
+    // Looks like the pointcloud doesn't play nice.
+    // Try checking if the cloud is even valid. List the points and their coordinates
+    
     // Remove NAN points
     std::vector<int> indices;
-    pcl::removeNaNFromPointCloud(*cloudPtr,*cloudPtr, indices);
+    //pcl::removeNaNFromPointCloud(*cloudPtr,*cloudPtr, indices);
 
-
+    /*
     // Perform voxelgrid filtering
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
 
@@ -287,7 +293,7 @@ void depthCallback(const sensor_msgs::PointCloud2& cloud_msg)
     sor.setInputCloud (cloudPtr);
     sor.setLeafSize (res, res, res);
     sor.filter (*cloud_filtered);
-    */
+    //*/
     
     state = NBV_STATE::DONE_SENSING;
     
