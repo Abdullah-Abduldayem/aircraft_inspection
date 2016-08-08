@@ -128,6 +128,7 @@ int max_iterations = 100;
 
 // == Publishers
 ros::Publisher pub_global_cloud;
+ros::Publisher pub_setpoint;
 
 // == Subscriptions
 geometry_msgs::Pose mobile_base_pose;
@@ -200,16 +201,29 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "nbv_loop");
     ros::NodeHandle ros_node;
 
+    // >>>>>>>>>>>>>>>>>
+    // Subscribers
+    // >>>>>>>>>>>>>>>>>
+    
+    // Sensor data
     ros::Subscriber sub_kinect = ros_node.subscribe(depth_topic, 1, depthCallback);
     ros::Subscriber sub_pose = ros_node.subscribe(position_topic, 1, positionCallback);
-
+    
+    
+    // >>>>>>>>>>>>>>>>>
+    // Publishers
+    // >>>>>>>>>>>>>>>>>
     
     pub_global_cloud = ros_node.advertise<sensor_msgs::PointCloud2>("/global_cloud", 10);
     //pub = ros_node.advertise<sensor_msgs::PointCloud2> ("/voxgrid", 1);
     //pub_pose = ros_node.advertise<geometry_msgs::PoseStamped> ("/voxgrid/pose", 1);
 
+    // Drone setpoints
+    pub_setpoint = ros_node.advertise<geometry_msgs::PoseStamped>("/iris/mavros/setpoint_position/local", 10);
 
+    // >>>>>>>>>>>>>>>>>
     // Start the FSM
+    // >>>>>>>>>>>>>>>>>
     state = NBV_STATE_IDLE;
     
     ros::Rate loop_rate(10);
@@ -478,7 +492,35 @@ void set_waypoint(){
     }
     
     
-    state = NBV_STATE_DONE_MOVING;
+    
+    // Publish pose (http://docs.ros.org/api/geometry_msgs/html/msg/PoseStamped.html)
+    geometry_msgs::PoseStamped setpoint;
+    
+    setpoint.header.frame_id = "base_footprint";
+    //setpoint.header.stamp = ros::Time::now();
+    
+    setpoint.pose.position.x = 10;
+    setpoint.pose.position.y = 10;
+    setpoint.pose.position.z = 1;
+    
+    setpoint.pose.orientation.x = 0.0;
+    setpoint.pose.orientation.y = 0.0;
+    setpoint.pose.orientation.z = 0.0;
+    setpoint.pose.orientation.w = 0.0;
+    
+    /*
+    ros::Rate rate(10);
+    for(int i = 100; ros::ok() && i > 0; --i){
+        pub_setpoint.publish(setpoint);
+        ros::spinOnce();
+        rate.sleep();
+        std::cout << cc_green << "Moving (setting waypoints)\n" << cc_reset;
+    }
+    */
+    
+    pub_setpoint.publish(setpoint);
+    
+    //state = NBV_STATE_DONE_MOVING;
 }
 
 
