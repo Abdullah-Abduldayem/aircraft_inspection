@@ -171,23 +171,23 @@ enum NBV_STATE {
     NBV_STATE_NOT_STARTED,
     NBV_STATE_INITIALIZING,
     NBV_STATE_IDLE,
-    NBV_STATE_SENSING, NBV_STATE_DONE_SENSING,
-    NBV_STATE_MAPPING, NBV_STATE_DONE_MAPPING,
+    NBV_STATE_TERMINATION_CHECK, NBV_STATE_TERMINATION_MET, NBV_STATE_TERMINATION_NOT_MET,
     NBV_STATE_VIEWPOINT_GENERATION, NBV_STATE_DONE_VIEWPOINT_GENERATION, 
     NBV_STATE_VIEWPOINT_EVALUATION, NBV_STATE_DONE_VIEWPOINT_EVALUATION,
     NBV_STATE_PATH_PLANNING,
-    NBV_STATE_MOVING, NBV_STATE_DONE_MOVING,
-    NBV_STATE_TERMINATION_CHECK, NBV_STATE_TERMINATION_MET, NBV_STATE_TERMINATION_NOT_MET};
+    NBV_STATE_MOVING, NBV_STATE_DONE_MOVING
+    };
 NBV_STATE state = NBV_STATE_NOT_STARTED;
 
 // ================
 // Functions
 // ================
-/*
+
 double randomDouble(double min, double max) {
     return ((double) random()/RAND_MAX)*(max-min) + min;
 }
 
+/*
 double rad2deg (double rad) {
     return rad*180/M_PI;
 }
@@ -242,19 +242,11 @@ int main(int argc, char **argv)
         switch(state){
             case NBV_STATE_IDLE:
             case NBV_STATE_DONE_MOVING:
-                state = NBV_STATE_SENSING;
+                state = NBV_STATE_TERMINATION_CHECK;
                 
                 iteration_count++;
                 std::cout << cc_yellow << "Iteration: " << iteration_count << "\n" << cc_reset;
-                break;
                 
-            case NBV_STATE_DONE_SENSING:
-                state = NBV_STATE_MAPPING;
-                addToGlobalCloud(cloud_sensed);
-                break;
-            
-            case NBV_STATE_DONE_MAPPING:
-                state = NBV_STATE_TERMINATION_CHECK;
                 termination_check();
                 break;
                 
@@ -314,10 +306,6 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 
 void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 {
-    if (state != NBV_STATE_SENSING){
-        //std::cout << cc_red << "ERROR: Attempt to sense out of order\n" << cc_reset;
-        return;
-    }
     if (isDebug){
         std::cout << cc_green << "SENSING\n" << cc_reset;
     }
@@ -384,22 +372,13 @@ void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
         ros::Duration(1.0).sleep();
     }
     
-    // == Signal end of sensing
-    state = NBV_STATE_DONE_SENSING;
-    
-    
+
     // == Add filtered to global
-    state = NBV_STATE_MAPPING;
     addToGlobalCloud(cloud_filtered);
 }
 
 
 void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
-    if (state != NBV_STATE_MAPPING){
-        std::cout << cc_red << "ERROR: Attempt to map out of order\n" << cc_reset;
-        return;
-    }
-    
     if (isDebug){
         std::cout << cc_green << "MAPPING\n" << cc_reset;
     }
@@ -407,8 +386,6 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
     // Initialize global cloud if not already done so
     if (!globalCloudPtr){
         globalCloudPtr = cloud_in;
-        state = NBV_STATE_DONE_MAPPING;
-        
         return;
     }
 
@@ -437,10 +414,6 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
     cloud_msg.header.stamp = ros::Time::now();
     
     pub_global_cloud.publish(cloud_msg);
-    
-    
-    // Signal task completion
-    state = NBV_STATE_DONE_MAPPING;
 }
 
 
@@ -483,6 +456,17 @@ void evaluate_viewpoints(){
         std::cout << cc_green << "Evaluating viewpoints\n" << cc_reset;
     }
     
+    
+    
+    setpoint.pose.position.x = 9 + randomDouble(-2,2);
+    setpoint.pose.position.y = 7 + randomDouble(-2,2);
+    setpoint.pose.position.z = 4;
+    
+    setpoint.pose.orientation.x = 0.0;
+    setpoint.pose.orientation.y = 0.0;
+    setpoint.pose.orientation.z = 0.0;
+    setpoint.pose.orientation.w = 0.0;
+    
     state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
 }
 
@@ -501,16 +485,6 @@ void set_waypoint(){
     // Publish pose (http://docs.ros.org/api/geometry_msgs/html/msg/PoseStamped.html)
     setpoint.header.frame_id = "base_footprint";
     setpoint.header.stamp = ros::Time::now();
-    
-    setpoint.pose.position.x = 9;
-    setpoint.pose.position.y = 7;
-    setpoint.pose.position.z = 4;
-    
-    setpoint.pose.orientation.x = 0.0;
-    setpoint.pose.orientation.y = 0.0;
-    setpoint.pose.orientation.z = 0.0;
-    setpoint.pose.orientation.w = 0.0;
-    
     pub_setpoint.publish(setpoint);
     
     
