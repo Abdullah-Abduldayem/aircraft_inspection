@@ -18,6 +18,7 @@
 
 #include <tf/transform_datatypes.h>
 #include <tf_conversions/tf_eigen.h>
+#include <tf/transform_listener.h>
 
 //PCL
 //#include <pcl/filters.hpp>
@@ -126,13 +127,19 @@ bool isTerminating = false;
 int iteration_count = 0;
 int max_iterations = 100;
 
+// == Navigation variables
+float near_threshold = 0.5f;
+geometry_msgs::Pose mobile_base_pose;
+//geometry_msgs::Pose mobile_base_pose_prev;
+geometry_msgs::PoseStamped setpoint;
+
 // == Publishers
 ros::Publisher pub_global_cloud;
 ros::Publisher pub_setpoint;
 
-// == Subscriptions
-geometry_msgs::Pose mobile_base_pose;
-geometry_msgs::Pose mobile_base_pose_prev;
+// == Subsctiptions
+tf::TransformListener *listener;
+
 
 // == Point clouds
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_sensed(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -154,6 +161,8 @@ void termination_check();
 void generate_viewpoints();
 void evaluate_viewpoints();
 void set_waypoint();
+double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
+bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current);
 
 // ======================
 // Create a state machine
@@ -209,6 +218,7 @@ int main(int argc, char **argv)
     ros::Subscriber sub_kinect = ros_node.subscribe(depth_topic, 1, depthCallback);
     ros::Subscriber sub_pose = ros_node.subscribe(position_topic, 1, positionCallback);
     
+    listener = new tf::TransformListener();
     
     // >>>>>>>>>>>>>>>>>
     // Publishers
@@ -284,6 +294,9 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
         std::cout << cc_magenta << "Grabbing location\n" << cc_reset;
     }
     
+    // Save UGV pose
+    mobile_base_pose = pose_msg.pose;
+    
     /*
     // Save UGV pose
     mobile_base_pose_prev = mobile_base_pose;
@@ -337,6 +350,39 @@ void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
     
     //std::cout << cc_blue << "Number of points remaining: " << cloud_filtered->points.size() << "\n" << cc_reset;
     
+    // == Transform
+    try{
+        // Listen for transform
+        tf::StampedTransform transform;
+        listener->lookupTransform("world", "iris/xtion_sensor/camera_depth_optical_frame", ros::Time(0), transform);
+        
+        // == Convert tf:Transform to Eigen::Matrix4d
+        Eigen::Matrix4d tf_eigen;
+        
+        Eigen::Vector3d T1(
+            transform.getOrigin().x(),
+            transform.getOrigin().y(),
+            transform.getOrigin().z()
+        );
+        
+        Eigen::Matrix3d R;
+        tf::Quaternion qt = transform.getRotation();
+        tf::Matrix3x3 R1(qt);
+        tf::matrixTFToEigen(R1,R);
+        
+        // Set
+        tf_eigen.setZero ();
+        tf_eigen.block (0, 0, 3, 3) = R;
+        tf_eigen.block (0, 3, 3, 1) = T1;
+        tf_eigen (3, 3) = 1;
+        
+        // == Transform point cloud
+        pcl::transformPointCloud(*cloud_filtered, *cloud_filtered, tf_eigen);
+    }
+    catch (tf::TransformException ex){
+        ROS_ERROR("%s",ex.what());
+        ros::Duration(1.0).sleep();
+    }
     
     // == Signal end of sensing
     state = NBV_STATE_DONE_SENSING;
@@ -369,49 +415,8 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
     *globalCloudPtr += *cloud_in;
 
 
-
-
-
-    /*
-    // ==========
-    // TRANSFORM
-    // ==========
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZRGB> ());
-    transformCam2Robot (*cloud_in, *transformed_cloud);
-
-    // Initialize global cloud if not already done so
-    if (!globalCloudPtr) {
-        globalCloudPtr = transformed_cloud;
-        return;
-    }
-    */
-
-    /*
-    // Preform ICP
-    pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
-    icp.setInputCloud(transformed_cloud);
-    icp.setInputTarget(globalCloudPtr);
-    pcl::PointCloud<pcl::PointXYZRGB> Final;
-    icp.align(Final);
-    std::cout << "has converged:" << icp.hasConverged() << " score: " <<
-    icp.getFitnessScore() << std::endl;
-    std::cout << icp.getFinalTransformation() << std::endl;
-
-    *globalCloudPtr += Final;
-    */
-
-    //globalCloudPtr = transformed_cloud;
-    //return;
-
-    //*globalCloudPtr += *transformed_cloud;
-
-
-
-
-
     // Perform voxelgrid filtering
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
-
 
     pcl::VoxelGrid<pcl::PointXYZRGB> sor;
     sor.setInputCloud (globalCloudPtr);
@@ -494,35 +499,57 @@ void set_waypoint(){
     
     
     // Publish pose (http://docs.ros.org/api/geometry_msgs/html/msg/PoseStamped.html)
-    geometry_msgs::PoseStamped setpoint;
-    
     setpoint.header.frame_id = "base_footprint";
-    //setpoint.header.stamp = ros::Time::now();
+    setpoint.header.stamp = ros::Time::now();
     
-    setpoint.pose.position.x = 10;
-    setpoint.pose.position.y = 10;
-    setpoint.pose.position.z = 1;
+    setpoint.pose.position.x = 9;
+    setpoint.pose.position.y = 7;
+    setpoint.pose.position.z = 4;
     
     setpoint.pose.orientation.x = 0.0;
     setpoint.pose.orientation.y = 0.0;
     setpoint.pose.orientation.z = 0.0;
     setpoint.pose.orientation.w = 0.0;
     
-    /*
-    ros::Rate rate(10);
-    for(int i = 100; ros::ok() && i > 0; --i){
-        pub_setpoint.publish(setpoint);
-        ros::spinOnce();
-        rate.sleep();
-        std::cout << cc_green << "Moving (setting waypoints)\n" << cc_reset;
-    }
-    */
-    
     pub_setpoint.publish(setpoint);
     
-    //state = NBV_STATE_DONE_MOVING;
+    
+    // Convert setpoint to world frame
+    //@todo: temp fix. Seems there's a transform here
+    geometry_msgs::Pose setpoint_world;
+    setpoint_world.position.x = setpoint.pose.position.y;
+    setpoint_world.position.y =-setpoint.pose.position.x;
+    setpoint_world.position.z = setpoint.pose.position.z;
+    
+    
+    // Wait till we've reached the waypoint
+    ros::Rate rate(10);
+    while(ros::ok() && !isNear(setpoint_world, mobile_base_pose)){
+        std::cout << cc_green << "Moving to destination. Distance to target: " << getDistance(setpoint_world, mobile_base_pose) << "\n" << cc_reset;
+        
+        ros::spinOnce();
+        rate.sleep();
+    }
+    
+    std::cout << cc_green << "Done moving\n" << cc_reset;
+    
+    state = NBV_STATE_DONE_MOVING;
 }
 
+bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current){
+    if (getDistance(p_target, p_current) < near_threshold){
+        return true;
+    }
+        
+    return false;
+}
+
+double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2){
+	return sqrt(
+        (p1.position.x-p2.position.x)*(p1.position.x-p2.position.x) +
+        (p1.position.y-p2.position.y)*(p1.position.y-p2.position.y) +
+        (p1.position.z-p2.position.z)*(p1.position.z-p2.position.z) );
+}
 
 void transformCam2Robot (const pcl::PointCloud<pcl::PointXYZRGB> &cloud_in, pcl::PointCloud<pcl::PointXYZRGB> &cloud_out)
 {

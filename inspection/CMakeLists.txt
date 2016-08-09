@@ -18,11 +18,15 @@ find_package(catkin REQUIRED COMPONENTS
   mav_msgs
   libmavconn
   tf
+  tf_conversions
+  eigen_conversions
 )
 
 find_package(Eigen REQUIRED)
+
 catkin_package(
   INCLUDE_DIRS #src/include
+  DEPENDS Eigen
   #LIBRARIES px4
   #CATKIN_DEPENDS message_runtime
   #roscpp rospy std_msgs libmavconn
@@ -33,7 +37,10 @@ find_package(PCL REQUIRED)
 find_package(Boost REQUIRED)
 find_package(octomap REQUIRED)
 
-include_directories(${PCL_INCLUDE_DIRS})
+include_directories(
+    ${PCL_INCLUDE_DIRS}
+    ${Eigen_INCLUDE_DIRS}
+)
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
@@ -45,4 +52,4 @@ add_definitions(${PCL_DEFINITIONS})
 
 add_executable(nbv_loop src/nbv_loop.cpp)
 add_dependencies(nbv_loop ${catkin_EXPORTED_TARGETS})
-target_link_libraries(nbv_loop ${catkin_LIBRARIES} -lgmp -lmpfr ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OCTOMAP_LIBRARIES} ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY})
+target_link_libraries(nbv_loop ${catkin_LIBRARIES} -lgmp -lmpfr ${PCL_LIBRARIES} ${Boost_LIBRARIES} ${OCTOMAP_LIBRARIES} ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_DATE_TIME_LIBRARY} ${Boost_UNIT_TEST_FRAMEWORK_LIBRARY} ${Eigen_LIBRARIES})
