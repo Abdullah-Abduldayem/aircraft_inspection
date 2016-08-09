@@ -116,7 +116,8 @@ const std::string cc_reset("\033[0m");
 // ===================
 // === Variables  ====
 // ===================
-bool isDebug = true; //Set to true to see debug text
+bool isDebug = !true; //Set to true to see debug text
+bool isDebugStates = false;
 
 // == Consts
 std::string depth_topic   = "/iris/xtion_sensor/iris/xtion_sensor_camera/depth/points";
@@ -128,7 +129,9 @@ int iteration_count = 0;
 int max_iterations = 100;
 
 // == Navigation variables
-float near_threshold = 0.5f;
+float distance_threshold = 0.5f;
+float angular_threshold = 10.0 * M_PI/180.0;//Degrees to radians
+
 geometry_msgs::Pose mobile_base_pose;
 //geometry_msgs::Pose mobile_base_pose_prev;
 geometry_msgs::PoseStamped setpoint;
@@ -162,6 +165,7 @@ void generate_viewpoints();
 void evaluate_viewpoints();
 void set_waypoint();
 double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
+double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
 bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current);
 
 // ======================
@@ -282,7 +286,7 @@ int main(int argc, char **argv)
 // Update global position of UGV
 void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 {
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_magenta << "Grabbing location\n" << cc_reset;
     }
     
@@ -306,7 +310,7 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 
 void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 {
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_green << "SENSING\n" << cc_reset;
     }
     
@@ -366,20 +370,20 @@ void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
         
         // == Transform point cloud
         pcl::transformPointCloud(*cloud_filtered, *cloud_filtered, tf_eigen);
+        
+        // == Add filtered to global
+        addToGlobalCloud(cloud_filtered);
     }
     catch (tf::TransformException ex){
         ROS_ERROR("%s",ex.what());
         ros::Duration(1.0).sleep();
     }
     
-
-    // == Add filtered to global
-    addToGlobalCloud(cloud_filtered);
 }
 
 
 void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_green << "MAPPING\n" << cc_reset;
     }
     
@@ -402,8 +406,9 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
 
     globalCloudPtr = cloud_filtered;
     
-    std::cout << cc_blue << "Number of points in global map: " << globalCloudPtr->points.size() << "\n" << cc_reset;
-    
+    if (isDebug){
+        std::cout << cc_blue << "Number of points in global map: " << globalCloudPtr->points.size() << "\n" << cc_reset;
+    }
     
     
     // Publish
@@ -422,7 +427,7 @@ void termination_check(){
         std::cout << cc_red << "ERROR: Attempt to check termination out of order\n" << cc_reset;
         return;
     }
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_green << "Checking termination condition\n" << cc_reset;
     }
     
@@ -441,7 +446,9 @@ void generate_viewpoints(){
         std::cout << cc_red << "ERROR: Attempt to generate viewpoints out of order\n" << cc_reset;
         return;
     }
-    std::cout << cc_green << "Generating viewpoints\n" << cc_reset;
+    if (isDebug && isDebugStates){
+        std::cout << cc_green << "Generating viewpoints\n" << cc_reset;
+    }
     
     state = NBV_STATE_DONE_VIEWPOINT_GENERATION;
 }
@@ -452,20 +459,26 @@ void evaluate_viewpoints(){
         std::cout << cc_red << "ERROR: Attempt to evaluate viewpoints out of order\n" << cc_reset;
         return;
     }
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_green << "Evaluating viewpoints\n" << cc_reset;
     }
     
     
-    
-    setpoint.pose.position.x = 9 + randomDouble(-2,2);
-    setpoint.pose.position.y = 7 + randomDouble(-2,2);
+    // Position
+    setpoint.pose.position.x = 9 + randomDouble(-4,4);
+    setpoint.pose.position.y = 7 + randomDouble(-4,4);
     setpoint.pose.position.z = 4;
     
-    setpoint.pose.orientation.x = 0.0;
-    setpoint.pose.orientation.y = 0.0;
-    setpoint.pose.orientation.z = 0.0;
-    setpoint.pose.orientation.w = 0.0;
+    // Orientation
+    double yaw = randomDouble(-3.14, 3.14);
+    yaw = -90;
+    tf::Quaternion tf_q;
+    tf_q = tf::createQuaternionFromYaw(yaw);
+    
+    setpoint.pose.orientation.x = tf_q.getX();
+    setpoint.pose.orientation.y = tf_q.getY();
+    setpoint.pose.orientation.z = tf_q.getZ();
+    setpoint.pose.orientation.w = tf_q.getW();
     
     state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
 }
@@ -476,10 +489,9 @@ void set_waypoint(){
         std::cout << cc_red << "ERROR: Attempt to move vehicle out of order\n" << cc_reset;
         return;
     }
-    if (isDebug){
+    if (isDebug && isDebugStates){
         std::cout << cc_green << "Moving (setting waypoints)\n" << cc_reset;
     }
-    
     
     
     // Publish pose (http://docs.ros.org/api/geometry_msgs/html/msg/PoseStamped.html)
@@ -495,11 +507,19 @@ void set_waypoint(){
     setpoint_world.position.y =-setpoint.pose.position.x;
     setpoint_world.position.z = setpoint.pose.position.z;
     
+    setpoint_world.orientation.x = setpoint.pose.orientation.x;
+    setpoint_world.orientation.y = setpoint.pose.orientation.y;
+    setpoint_world.orientation.z = setpoint.pose.orientation.z;
+    setpoint_world.orientation.w = setpoint.pose.orientation.w;
     
     // Wait till we've reached the waypoint
     ros::Rate rate(10);
     while(ros::ok() && !isNear(setpoint_world, mobile_base_pose)){
-        std::cout << cc_green << "Moving to destination. Distance to target: " << getDistance(setpoint_world, mobile_base_pose) << "\n" << cc_reset;
+        if (isDebug){
+            std::cout << cc_green << "Moving to destination. " <<
+                "Distance to target: " << getDistance(setpoint_world, mobile_base_pose) <<
+                "\tAngle to target: " << getAngularDistance(setpoint_world, mobile_base_pose) << "\n" << cc_reset;
+        }
         
         ros::spinOnce();
         rate.sleep();
@@ -511,7 +531,9 @@ void set_waypoint(){
 }
 
 bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current){
-    if (getDistance(p_target, p_current) < near_threshold){
+    if (
+        getDistance(p_target, p_current) < distance_threshold &&
+        fabs(getAngularDistance(p_target, p_current)) < angular_threshold){
         return true;
     }
         
@@ -523,6 +545,47 @@ double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2){
         (p1.position.x-p2.position.x)*(p1.position.x-p2.position.x) +
         (p1.position.y-p2.position.y)*(p1.position.y-p2.position.y) +
         (p1.position.z-p2.position.z)*(p1.position.z-p2.position.z) );
+}
+
+double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2){
+    double roll1, pitch1, yaw1;
+    double roll2, pitch2, yaw2;
+    
+    tf::Quaternion q1 (
+        p1.orientation.x,
+        p1.orientation.y,
+        p1.orientation.z,
+        p1.orientation.w
+        );
+        
+    tf::Quaternion q2 (
+        p2.orientation.x,
+        p2.orientation.y,
+        p2.orientation.z,
+        p2.orientation.w
+        );
+    
+	tf::Matrix3x3(q1).getRPY(roll1, pitch1, yaw1);
+    tf::Matrix3x3(q2).getRPY(roll2, pitch2, yaw2);
+    
+    //@todo: temp fix. there's a rotation here
+    yaw2 += M_PI_2;
+    
+    // Set differnce from -pi to pi
+    double yaw_diff = fmod(yaw1 - yaw2, 2*M_PI);
+    if (yaw_diff > M_PI){
+        //std::cout << cc_green << "Decreased by 360: \n";
+        yaw_diff = yaw_diff - 2*M_PI;
+    }
+    else if (yaw_diff < -M_PI){
+        //std::cout << cc_green << "Increased by 360: \n";
+        yaw_diff = yaw_diff + 2*M_PI;
+    }
+        
+    //std::cout << cc_green << "Yaw1: " << yaw1*180/M_PI << "\tYaw2: " << yaw2*180/M_PI << "\n" << cc_reset;
+    //std::cout << cc_green << "Yaw difference: " << yaw_diff*180/M_PI << "\n" << cc_reset;
+    
+    return yaw_diff;
 }
 
 void transformCam2Robot (const pcl::PointCloud<pcl::PointXYZRGB> &cloud_in, pcl::PointCloud<pcl::PointXYZRGB> &cloud_out)
