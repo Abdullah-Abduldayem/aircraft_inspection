@@ -117,7 +117,7 @@ const std::string cc_reset("\033[0m");
 // === Variables  ====
 // ===================
 bool isDebug = !true; //Set to true to see debug text
-bool isDebugStates = false;
+bool isDebugStates = !true;
 
 // == Consts
 std::string depth_topic   = "/iris/xtion_sensor/iris/xtion_sensor_camera/depth/points";
@@ -126,7 +126,7 @@ std::string position_topic = "/iris/ground_truth/pose";
 // == Termination variables
 bool isTerminating = false;
 int iteration_count = 0;
-int max_iterations = 100;
+int max_iterations = 40;
 
 // == Navigation variables
 float distance_threshold = 0.5f;
@@ -163,7 +163,10 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in);
 void termination_check();
 void generate_viewpoints();
 void evaluate_viewpoints();
-void set_waypoint();
+void set_waypoint(double x, double y, double z, double yaw);
+void move_vehicle();
+void takeoff();
+
 double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
 double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
 bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current);
@@ -178,6 +181,7 @@ enum NBV_STATE {
     NBV_STATE_NOT_STARTED,
     NBV_STATE_INITIALIZING,
     NBV_STATE_IDLE,
+    NBV_STATE_TAKING_OFF,
     NBV_STATE_TERMINATION_CHECK, NBV_STATE_TERMINATION_MET, NBV_STATE_TERMINATION_NOT_MET,
     NBV_STATE_VIEWPOINT_GENERATION, NBV_STATE_DONE_VIEWPOINT_GENERATION, 
     NBV_STATE_VIEWPOINT_EVALUATION, NBV_STATE_DONE_VIEWPOINT_EVALUATION,
@@ -241,12 +245,23 @@ int main(int argc, char **argv)
     // >>>>>>>>>>>>>>>>>
     // Start the FSM
     // >>>>>>>>>>>>>>>>>
-    state = NBV_STATE_IDLE;
+    state = NBV_STATE_TAKING_OFF;
     
     ros::Rate loop_rate(10);
     while (ros::ok() && !isTerminating)
     {
         switch(state){
+            case NBV_STATE_TAKING_OFF:
+                // Wait till we have current location to properly set waypoint for takeoff
+                if(mobile_base_pose.orientation.x == 0 &&
+                    mobile_base_pose.orientation.y == 0 &&
+                    mobile_base_pose.orientation.z == 0 &&
+                    mobile_base_pose.orientation.w == 0){
+                        break;
+                    }
+                takeoff();
+                break;
+                
             case NBV_STATE_IDLE:
             case NBV_STATE_DONE_MOVING:
                 state = NBV_STATE_TERMINATION_CHECK;
@@ -274,7 +289,7 @@ int main(int argc, char **argv)
             
             case NBV_STATE_DONE_VIEWPOINT_EVALUATION:
                 state = NBV_STATE_MOVING;
-                set_waypoint();
+                move_vehicle();
                 break;
         }
         
@@ -468,17 +483,27 @@ void evaluate_viewpoints(){
     }
     
     
-    // Set waypoint in global frame
+    double yaw = randomDouble(M_PI-M_PI_4, M_PI+M_PI_4);
+    set_waypoint(
+        5,      //x
+        mobile_base_pose.position.y + 1, //y
+        4,      //z
+        yaw    //yaw
+    );
+    
+    
+    state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
+}
+
+void set_waypoint(double x, double y, double z, double yaw){
     geometry_msgs::Pose setpoint_world;
     
     // Position
-    setpoint_world.position.x = 6;// + randomDouble(-4,4);
-    setpoint_world.position.y = -11;// + randomDouble(-4,4);
-    setpoint_world.position.z = 5;
+    setpoint_world.position.x = x;
+    setpoint_world.position.y = y;
+    setpoint_world.position.z = z;
     
     // Orientation
-    double yaw = randomDouble(-3.14, 3.14);
-    yaw = M_PI;
     tf::Quaternion tf_q;
     tf_q = tf::createQuaternionFromYaw(yaw);
     
@@ -489,15 +514,10 @@ void evaluate_viewpoints(){
     
     // Transform to setpoint frame
     transformGlobal2Setpoint(setpoint_world, setpoint.pose);
-    
-    
-    
-    state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
 }
 
-
-void set_waypoint(){
-    if (state != NBV_STATE_MOVING){
+void move_vehicle(){
+    if (state != NBV_STATE_MOVING && state != NBV_STATE_TAKING_OFF){
         std::cout << cc_red << "ERROR: Attempt to move vehicle out of order\n" << cc_reset;
         return;
     }
@@ -529,9 +549,44 @@ void set_waypoint(){
         rate.sleep();
     }
     
-    std::cout << cc_green << "Done moving\n" << cc_reset;
+    if (state == NBV_STATE_MOVING){
+        std::cout << cc_green << "Done moving\n" << cc_reset;
+        state = NBV_STATE_DONE_MOVING;
+    }
+}
+
+
+void takeoff(){
+    if (state != NBV_STATE_TAKING_OFF){
+        std::cout << cc_red << "ERROR: Attempt to take off out of order\n" << cc_reset;
+        return;
+    }
+    std::cout << cc_green << "Taking off\n" << cc_reset;
     
-    state = NBV_STATE_DONE_MOVING;
+    
+    
+    double x = mobile_base_pose.position.x;
+    double y = mobile_base_pose.position.y;
+    double yaw = M_PI;
+    
+    // Simulate smooth takeoff
+    set_waypoint(x, y, 2, yaw);
+    move_vehicle();
+    
+    set_waypoint(x, y, 3, yaw);
+    move_vehicle();
+    
+    set_waypoint(x, y, 4, yaw);
+    move_vehicle();
+    
+    /*
+    set_waypoint(x, y, 5, yaw);
+    move_vehicle();
+    */
+    
+    
+    std::cout << cc_green << "Done taking off\n" << cc_reset;
+    state = NBV_STATE_IDLE;
 }
 
 bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current){
