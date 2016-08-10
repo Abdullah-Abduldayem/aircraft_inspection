@@ -168,6 +168,9 @@ double getDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
 double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2);
 bool isNear(const geometry_msgs::Pose p_target, const geometry_msgs::Pose p_current);
 
+void transformSetpoint2Global (const geometry_msgs::Pose & p_set, geometry_msgs::Pose & p_global);
+void transformGlobal2Setpoint (const geometry_msgs::Pose & p_global, geometry_msgs::Pose & p_set);
+
 // ======================
 // Create a state machine
 // ======================
@@ -394,7 +397,8 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
     }
 
     *globalCloudPtr += *cloud_in;
-
+    
+    
 
     // Perform voxelgrid filtering
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -464,21 +468,29 @@ void evaluate_viewpoints(){
     }
     
     
+    // Set waypoint in global frame
+    geometry_msgs::Pose setpoint_world;
+    
     // Position
-    setpoint.pose.position.x = 9 + randomDouble(-4,4);
-    setpoint.pose.position.y = 7 + randomDouble(-4,4);
-    setpoint.pose.position.z = 4;
+    setpoint_world.position.x = 6;// + randomDouble(-4,4);
+    setpoint_world.position.y = -11;// + randomDouble(-4,4);
+    setpoint_world.position.z = 5;
     
     // Orientation
     double yaw = randomDouble(-3.14, 3.14);
-    yaw = -90;
+    yaw = M_PI;
     tf::Quaternion tf_q;
     tf_q = tf::createQuaternionFromYaw(yaw);
     
-    setpoint.pose.orientation.x = tf_q.getX();
-    setpoint.pose.orientation.y = tf_q.getY();
-    setpoint.pose.orientation.z = tf_q.getZ();
-    setpoint.pose.orientation.w = tf_q.getW();
+    setpoint_world.orientation.x = tf_q.getX();
+    setpoint_world.orientation.y = tf_q.getY();
+    setpoint_world.orientation.z = tf_q.getZ();
+    setpoint_world.orientation.w = tf_q.getW();
+    
+    // Transform to setpoint frame
+    transformGlobal2Setpoint(setpoint_world, setpoint.pose);
+    
+    
     
     state = NBV_STATE_DONE_VIEWPOINT_EVALUATION;
 }
@@ -501,16 +513,8 @@ void set_waypoint(){
     
     
     // Convert setpoint to world frame
-    //@todo: temp fix. Seems there's a transform here
     geometry_msgs::Pose setpoint_world;
-    setpoint_world.position.x = setpoint.pose.position.y;
-    setpoint_world.position.y =-setpoint.pose.position.x;
-    setpoint_world.position.z = setpoint.pose.position.z;
-    
-    setpoint_world.orientation.x = setpoint.pose.orientation.x;
-    setpoint_world.orientation.y = setpoint.pose.orientation.y;
-    setpoint_world.orientation.z = setpoint.pose.orientation.z;
-    setpoint_world.orientation.w = setpoint.pose.orientation.w;
+    transformSetpoint2Global (setpoint.pose, setpoint_world);
     
     // Wait till we've reached the waypoint
     ros::Rate rate(10);
@@ -568,9 +572,6 @@ double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2){
 	tf::Matrix3x3(q1).getRPY(roll1, pitch1, yaw1);
     tf::Matrix3x3(q2).getRPY(roll2, pitch2, yaw2);
     
-    //@todo: temp fix. there's a rotation here
-    yaw2 += M_PI_2;
-    
     // Set differnce from -pi to pi
     double yaw_diff = fmod(yaw1 - yaw2, 2*M_PI);
     if (yaw_diff > M_PI){
@@ -588,67 +589,61 @@ double getAngularDistance(geometry_msgs::Pose p1, geometry_msgs::Pose p2){
     return yaw_diff;
 }
 
-void transformCam2Robot (const pcl::PointCloud<pcl::PointXYZRGB> &cloud_in, pcl::PointCloud<pcl::PointXYZRGB> &cloud_out)
+void transformSetpoint2Global (const geometry_msgs::Pose & p_set, geometry_msgs::Pose& p_global)
 {
-    if (&cloud_in != &cloud_out) {
-        cloud_out = cloud_in;
-    }
-
-    /*
-    // Sensor settings
-    Eigen::Vector3d rpy(0, 0.18, 3.14);
-    Eigen::Vector4d xyz(mobile_base_pose.position.x, mobile_base_pose.position.y, mobile_base_pose.position.z, 1);
-
-    Eigen::Matrix3d R;
-    tf::Quaternion qt = tf::createQuaternionFromRPY(-rpy[1],-rpy[0],-rpy[2]);
-
-    tf::Matrix3x3 R1(qt);
-    tf::matrixTFToEigen(R1,R);
-
-    Eigen::Matrix4d tf_matrix;
-    tf_matrix.setZero();
-    tf_matrix.block (0, 0, 3, 3) = R;
-    tf_matrix (3, 3) = 1;
-
-    Eigen::Matrix4d tf_matrix_swap;
-    tf_matrix_swap <<   0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        1, 0, 0, 0,
-                        0, 0, 0, 1;
-
-
+    // Apply a 90 degree clockwise rotation on the z-axis
+    p_global.position.x = p_set.position.y;
+    p_global.position.y =-p_set.position.x;
+    p_global.position.z = p_set.position.z;
+    
+    
+    
     double roll, pitch, yaw;
-    tf::Quaternion q(
-        mobile_base_pose.orientation.x,
-        mobile_base_pose.orientation.y,
-        mobile_base_pose.orientation.z,
-        mobile_base_pose.orientation.w
-    );
-    tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
+    
+    tf::Quaternion q1 (
+        p_set.orientation.x,
+        p_set.orientation.y,
+        p_set.orientation.z,
+        p_set.orientation.w
+        );
+        
+    tf::Matrix3x3(q1).getRPY(roll, pitch, yaw);
+    
+    yaw -= M_PI_2; //Rotate
+    
+    tf::Quaternion qt = tf::createQuaternionFromRPY(roll,pitch,yaw);
+    
+    p_global.orientation.x = qt.getX();
+    p_global.orientation.y = qt.getY();
+    p_global.orientation.z = qt.getZ();
+    p_global.orientation.w = qt.getW();
+}
 
-    tf::Quaternion qt2 = tf::createQuaternionFromRPY(-rpy[1], -yaw, M_PI);
-
-    tf::Matrix3x3 R2(qt2);
-    tf::matrixTFToEigen(R2,R);
-
-    Eigen::Matrix4d tf_final;
-    tf_final.setZero();
-    tf_final.block (0, 0, 3, 3) << tf_matrix.block (0, 0, 3, 3) * R;
-    //tf_matrix.block (0, 0, 3, 3) = R;//.transpose();
-    tf_final.block (0, 3, 4, 1) << tf_matrix * tf_matrix_swap * xyz;
-    //tf_matrix (3, 3) = 1;
-
-    //tf_final = tf_matrix * tf_matrix_swap * tf_final;
-
-    // Perfrom transformation
-    for (size_t i = 0; i < cloud_in.points.size (); i++)
-    {
-        Eigen::Vector4d pt(cloud_in.points[i].x, cloud_in.points[i].y, cloud_in.points[i].z, 1);
-        Eigen::Vector4d pt_tf = tf_final*pt;
-
-        cloud_out.points[i].x = pt_tf[0];
-        cloud_out.points[i].y = pt_tf[1];
-        cloud_out.points[i].z = pt_tf[2];
-    }
-    */
+void transformGlobal2Setpoint (const geometry_msgs::Pose & p_global, geometry_msgs::Pose& p_set)
+{
+    // Apply a 90 degree anti-clockwise rotation on the z-axis
+    p_set.position.x =-p_global.position.y;
+    p_set.position.y = p_global.position.x;
+    p_set.position.z = p_global.position.z;
+    
+    
+    double roll, pitch, yaw;
+    
+    tf::Quaternion q1 (
+        p_global.orientation.x,
+        p_global.orientation.y,
+        p_global.orientation.z,
+        p_global.orientation.w
+        );
+        
+    tf::Matrix3x3(q1).getRPY(roll, pitch, yaw);
+    
+    yaw += M_PI_2; //Rotate
+    
+    tf::Quaternion qt = tf::createQuaternionFromRPY(roll,pitch,yaw);
+    
+    p_set.orientation.x = qt.getX();
+    p_set.orientation.y = qt.getY();
+    p_set.orientation.z = qt.getZ();
+    p_set.orientation.w = qt.getW();
 }
