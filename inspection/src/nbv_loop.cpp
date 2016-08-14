@@ -116,8 +116,9 @@ const std::string cc_reset("\033[0m");
 // ===================
 // === Variables  ====
 // ===================
-bool isDebug = !true; //Set to true to see debug text
-bool isDebugStates = !true;
+bool isDebug = true; //Set to true to see debug text
+bool isDebugStates = true;
+bool isDebugContinuousStates = !true;
 
 // == Consts
 std::string depth_topic   = "/iris/xtion_sensor/iris/xtion_sensor_camera/depth/points";
@@ -304,7 +305,7 @@ int main(int argc, char **argv)
 // Update global position of UGV
 void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 {
-    if (isDebug && isDebugStates){
+    if (isDebug && isDebugContinuousStates){
         std::cout << cc_magenta << "Grabbing location\n" << cc_reset;
     }
     
@@ -328,7 +329,7 @@ void positionCallback(const geometry_msgs::PoseStamped& pose_msg)
 
 void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 {
-    if (isDebug && isDebugStates){
+    if (isDebug && isDebugContinuousStates){
         std::cout << cc_green << "SENSING\n" << cc_reset;
     }
     
@@ -401,7 +402,7 @@ void depthCallback(const sensor_msgs::PointCloud2::ConstPtr& cloud_msg)
 
 
 void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
-    if (isDebug && isDebugStates){
+    if (isDebug && isDebugContinuousStates){
         std::cout << cc_green << "MAPPING\n" << cc_reset;
     }
     
@@ -425,7 +426,7 @@ void addToGlobalCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_in) {
 
     globalCloudPtr = cloud_filtered;
     
-    if (isDebug){
+    if (isDebug && isDebugContinuousStates){
         std::cout << cc_blue << "Number of points in global map: " << globalCloudPtr->points.size() << "\n" << cc_reset;
     }
     
@@ -539,7 +540,7 @@ void move_vehicle(){
     // Wait till we've reached the waypoint
     ros::Rate rate(10);
     while(ros::ok() && !isNear(setpoint_world, mobile_base_pose)){
-        if (isDebug){
+        if (isDebug && isDebugContinuousStates){
             std::cout << cc_green << "Moving to destination. " <<
                 "Distance to target: " << getDistance(setpoint_world, mobile_base_pose) <<
                 "\tAngle to target: " << getAngularDistance(setpoint_world, mobile_base_pose) << "\n" << cc_reset;
@@ -569,21 +570,11 @@ void takeoff(){
     double y = mobile_base_pose.position.y;
     double yaw = M_PI;
     
-    // Simulate smooth takeoff
-    set_waypoint(x, y, 2, yaw);
-    move_vehicle();
-    
-    set_waypoint(x, y, 3, yaw);
-    move_vehicle();
-    
-    set_waypoint(x, y, 4, yaw);
-    move_vehicle();
-    
-    /*
-    set_waypoint(x, y, 5, yaw);
-    move_vehicle();
-    */
-    
+    // Simulate smooth takeoff at 4 meters
+    for (int i=1; i<=4; i++){
+        set_waypoint(x, y, i, yaw);
+        move_vehicle();
+    }
     
     std::cout << cc_green << "Done taking off\n" << cc_reset;
     state = NBV_STATE_IDLE;
